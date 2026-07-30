@@ -30,6 +30,7 @@
     "db:new": "supabase migration new",
     "db:types": "supabase gen types typescript --local > src/lib/supabase/database.types.ts",
     "db:test": "tsx scripts/db-test.ts",
+    "db:test:concurrency": "tsx scripts/db-concurrency-test.ts",
     "psgc:build": "tsx scripts/psgc-build.ts",
     "psgc:seed": "tsx scripts/psgc-seed.ts"
   },

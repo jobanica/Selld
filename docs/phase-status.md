@@ -9,8 +9,8 @@ phase's scope and done-when criteria.
 | 1 | Auth & multi-tenant core | ✅ Complete |
 | 2 | Store onboarding wizard | ✅ Complete |
 | 3 | Catalog | ✅ Complete |
-| 4 | Inventory | ⬜ Next |
-| 5 | Storefront | ⬜ |
+| 4 | Inventory | ✅ Complete |
+| 5 | Storefront | ⬜ Next |
 | 6 | Cart & guest checkout | ⬜ |
 | 7 | Shipping configuration | ⬜ |
 | 8 | Payments | ⬜ |
@@ -29,6 +29,117 @@ phase's scope and done-when criteria.
 
 Phases 0–9 are a complete sellable product. MVP for first paying customers is
 0 → 11.
+
+---
+
+## Phase 4 — Inventory ✅
+
+**Done-when criterion**
+
+> Two concurrent checkouts for the last unit — exactly one succeeds. Oversell
+> prevention as a Postgres constraint + advisory lock, not application logic.
+
+✅ Proven by [`scripts/db-concurrency-test.ts`](../scripts/db-concurrency-test.ts):
+**23 assertions across 5 scenarios, using real parallel connections.** This cannot
+live in the SQL suite — a single psql session runs statements in order, so it can
+simulate a race but never reproduce one.
+
+```
+=== 1. Two checkouts, one unit, race held open
+  ok  client A reserved the last unit
+  ok  client B blocked on the advisory lock instead of reading stale stock
+  ok  client B failed once A committed
+  ok  client B got a business error ("Insufficient stock"), not a constraint violation
+  ok  exactly one unit ended up reserved (= 1)
+  ok  on_hand is untouched — a reservation is not a movement (= 1)
+
+=== 2. 20 simultaneous buyers, 5 units
+  ok  exactly 5 buyers won (= 5)
+  ok  the other 15 were told stock ran out (= 15)
+  ok  nobody hit an unexpected error — every loss was a clean business error (= 0)
+
+=== 3. Opposing multi-variant carts (deadlock avoidance)
+  ok  no deadlock — locks are acquired in sorted order
+
+=== 5. Raw UPDATEs with no lock — the CHECK constraint alone
+  ok  refused by the inventory_no_oversell CHECK — the constraint, not the lock
+```
+
+**Each layer is verified independently.** Sabotage runs showed the two defences are
+caught by *different* tests, which is worth knowing:
+
+| Sabotage | Caught by |
+|---|---|
+| Remove the advisory lock | Scenario 3 (deadlock detected) |
+| Remove the `reserved <= on_hand` CHECK | Scenario 5, and the SQL suite |
+
+Scenario 5 exists because of that finding. Without it, deleting the constraint left
+scenarios 1–3 green — the lock alone serialises reservations, so the constraint never
+fires — which made "the constraint protects us even if a future code path forgets the
+lock" an untested claim. Scenario 5 bypasses `reserve_stock()` with raw UPDATEs and
+tests exactly that.
+
+**The design decision**
+
+The movement ledger is the source of truth; `inventory_levels.on_hand` is a cache
+maintained by trigger. The alternative — update the count and separately write a
+history row — drifts, and a seller who cannot reconcile "I have 7" against "here is
+why" stops trusting the number and then stops using the feature. So `on_hand` is
+never written directly (a guard trigger refuses), the ledger is append-only, and
+`sum(delta) = on_hand` holds by construction. Both suites assert it.
+
+Reservations are deliberately **not** movements: reserving changes no physical stock,
+so it touches `reserved` only. `available = on_hand − reserved`, and the UI leads
+with available rather than on hand — on hand is what is in the room, available is
+what a buyer can actually buy, and showing the wrong one is how a seller oversells
+while looking at a screen that says she has stock.
+
+**Delivered**
+
+- `inventory_levels` and `stock_movements`, both tenant-scoped with RLS
+- Reserve / release / ship / adjust / stock-take RPCs, all holding sorted advisory
+  locks
+- Stock adjustment UI with reason codes, in two modes (relative "received 50",
+  absolute "I counted 5" — the latter still writes the difference as a movement)
+- The per-variant movement ledger, shown **inside** the adjustment sheet rather than
+  on a separate screen: a seller adjusting stock is almost always reconciling, and
+  the history that answers her question belongs where she asks it
+- Low-stock thresholds, a dashboard-ready count, and a filter
+- `storefront_availability` — `in_stock` plus a coarse bucket, with exact counts
+  withheld by design (a count tells a competitor the seller's volume)
+- Isolation suite extended to inventory: **157 assertions**
+
+**Two bugs found, both the same shape**
+
+`prevent_last_owner_removal` (phase 1) and `reject_ledger_mutation` (this phase) were
+both written to block a deliberate act, and both also fired on the DELETE cascade
+from removing a parent. Between them, **a tenant could never be deleted** — which
+also made phase 1's "Owners delete their tenant" RLS policy dead code. Phase 1's
+tests asserted the last owner cannot be demoted or removed; they never asked whether
+a tenant can be deleted at all, so it shipped green. Fixed in
+`20260730000600_fix_tenant_deletion.sql`, with the lesson recorded in `CLAUDE.md`.
+
+**A CI flake found and fixed.** `pg_isready` returns true before the Postgres image
+finishes installing extension files, so applying migrations immediately after the
+health check can fail on a missing `pg_trgm`. It bit locally; in CI it would have
+been an intermittent failure under load. The workflow now gates on a query that
+proves the instance is actually usable.
+
+**Deferred, deliberately**
+
+- **`stock_transfers` / `stock_transfer_items` are not built.** The build spec
+  itself flags them as trimmable from v1, and multi-location transfers are only
+  meaningful once a seller has more than one location — which the Scale tier
+  introduces in phase 19. The `transfer` reason code exists so the ledger can
+  already record one.
+- `incoming` is stored and displayed but nothing writes it yet; purchase orders are
+  not in the 21-phase plan.
+- `saveProduct()` is still a sequence of PostgREST calls rather than one RPC. I said
+  in phase 3 that phase 4 would move it — it turned out not to be load-bearing,
+  because `inventory_levels` rows are created lazily by the first movement rather
+  than at product creation, so a partial product save leaves no inventory
+  inconsistency. Moving it now would be churn for its own sake; phase 6 revisits it
+  when checkout genuinely needs multi-table atomicity.
 
 ---
 

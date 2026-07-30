@@ -5,7 +5,7 @@ Build one phase per session, in order. The full roadmap is in
 [`docs/build-spec.md`](docs/build-spec.md); who we're building for is in
 [`docs/avatar.md`](docs/avatar.md).
 
-**Current state: phase 3 complete.** Next up is phase 4 (inventory).
+**Current state: phase 4 complete.** Next up is phase 5 (storefront).
 
 ---
 
@@ -22,6 +22,8 @@ pnpm db:reset         # reset + re-run migrations, then reseed PSGC
 pnpm db:new <name>    # scaffold a migration
 pnpm db:types         # regenerate src/lib/supabase/database.types.ts — after EVERY migration
 pnpm db:test          # run supabase/tests/*.sql (RLS isolation). Needs a database.
+pnpm db:test:concurrency  # oversell prevention, with real parallel connections
+scripts/db-reset-local.sh # rebuild a bare pg container from the migrations
 
 pnpm psgc:build       # refetch PSGC from the PSA mirror (only when PSA publishes an update)
 pnpm psgc:seed        # load supabase/seed/psgc.json.gz into the database
@@ -111,7 +113,7 @@ src/
   app/          ← dashboard (authenticated seller surface)
   storefront/   ← public buyer surface, own perf budget
   features/     ← feature slices; may import from core and lib
-    address/ auth/ catalog/ onboarding/ tenancy/
+    address/ auth/ catalog/ inventory/ onboarding/ tenancy/
   lib/          ← money, phone, psgc, i18n, time, supabase, tenant
   components/ui ← shadcn/ui primitives
 ```
@@ -175,6 +177,19 @@ one new file plus one registry line, and zero lines of order logic.
   back). `product_variants` validates immediately; `product_options` re-validates
   its product's variants deferred, because regenerating a matrix is legitimately
   multi-statement.
+- **Never write `inventory_levels.on_hand`.** It is a cache of the movement ledger,
+  maintained by trigger, and a guard rejects direct writes. Insert a
+  `stock_movements` row (or call `record_stock_movement` / `set_stock_level`).
+  `sum(delta) = on_hand` is asserted by both DB suites.
+- **A guard trigger on a child table must allow the parent's DELETE cascade.** Two
+  triggers got this wrong and between them made a tenant undeletable — see
+  `20260730000600`. Check whether the parent row still exists: on a cascade it is
+  already gone, which cleanly distinguishes "the parent is going away" from
+  "someone is editing this row".
+- **Take advisory locks in sorted order.** Two carts holding {A,B} and {B,A} and
+  locking in arrival order deadlock, and Postgres kills one — a failed checkout for
+  a buyer who did nothing wrong. `reserve_stock` sorts; scenario 3 of the
+  concurrency test fails if that is removed.
 - **Controlled inputs, or bulk edits silently desync.** A `defaultValue` money input
   ignores an external change, so "apply to all" updated state and left twelve
   inputs showing the old price — saved correctly, looked broken.

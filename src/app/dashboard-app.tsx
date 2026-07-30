@@ -8,6 +8,7 @@ import { NotFound } from '@/app/pages/not-found'
 import { RequireAuth } from '@/features/auth/require-auth'
 import { SessionProvider } from '@/features/auth/session-provider'
 import { ProductListPage } from '@/features/catalog/product-list-page'
+import { InventoryPage } from '@/features/inventory/inventory-page'
 import { AcceptInvitationPage } from '@/features/tenancy/accept-invitation-page'
 import { TenantProvider } from '@/features/tenancy/tenant-provider'
 
@@ -22,7 +23,7 @@ import { TenantProvider } from '@/features/tenancy/tenant-provider'
 export default function DashboardApp() {
   // Routes that have a real implementation. Everything else in the nav still
   // renders a placeholder rather than 404ing.
-  const implemented = new Set(['/', '/products'])
+  const implemented = new Set(['/', '/products', '/inventory'])
   const pending = ALL_NAV_ITEMS.filter((item) => !implemented.has(item.to))
 
   return (
@@ -42,6 +43,7 @@ export default function DashboardApp() {
           >
             <Route index element={<DashboardHome />} />
             <Route path="/products" element={<ProductListPage />} />
+            <Route path="/inventory" element={<InventoryPage />} />
             {pending.map((item) => (
               <Route key={item.to} path={item.to} element={<ComingSoon />} />
             ))}

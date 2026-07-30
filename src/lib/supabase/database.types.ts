@@ -98,6 +98,88 @@ export type Database = {
           },
         ]
       }
+      inventory_levels: {
+        Row: {
+          created_at: string
+          id: string
+          incoming: number
+          location_id: string
+          low_stock_threshold: number | null
+          on_hand: number
+          reserved: number
+          tenant_id: string
+          updated_at: string
+          variant_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          incoming?: number
+          location_id: string
+          low_stock_threshold?: number | null
+          on_hand?: number
+          reserved?: number
+          tenant_id: string
+          updated_at?: string
+          variant_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          incoming?: number
+          location_id?: string
+          low_stock_threshold?: number | null
+          on_hand?: number
+          reserved?: number
+          tenant_id?: string
+          updated_at?: string
+          variant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inventory_levels_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_levels_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_levels_tenant_id_location_id_fkey"
+            columns: ["tenant_id", "location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "inventory_levels_tenant_id_variant_id_fkey"
+            columns: ["tenant_id", "variant_id"]
+            isOneToOne: false
+            referencedRelation: "product_variants"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "inventory_levels_tenant_id_variant_id_fkey"
+            columns: ["tenant_id", "variant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_availability"
+            referencedColumns: ["tenant_id", "variant_id"]
+          },
+          {
+            foreignKeyName: "inventory_levels_tenant_id_variant_id_fkey"
+            columns: ["tenant_id", "variant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_variants"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
       invitations: {
         Row: {
           accepted_at: string | null
@@ -401,6 +483,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "product_variants"
             referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "product_images_tenant_id_variant_id_fkey"
+            columns: ["tenant_id", "variant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_availability"
+            referencedColumns: ["tenant_id", "variant_id"]
           },
           {
             foreignKeyName: "product_images_tenant_id_variant_id_fkey"
@@ -894,6 +983,98 @@ export type Database = {
         }
         Relationships: []
       }
+      stock_movements: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          delta: number
+          id: string
+          location_id: string
+          note: string | null
+          reason: string
+          reference_id: string | null
+          reference_type: string | null
+          tenant_id: string
+          variant_id: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          delta: number
+          id?: string
+          location_id: string
+          note?: string | null
+          reason: string
+          reference_id?: string | null
+          reference_type?: string | null
+          tenant_id: string
+          variant_id: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          delta?: number
+          id?: string
+          location_id?: string
+          note?: string | null
+          reason?: string
+          reference_id?: string | null
+          reference_type?: string | null
+          tenant_id?: string
+          variant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stock_movements_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_movements_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_movements_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "stock_movements_tenant_id_location_id_fkey"
+            columns: ["tenant_id", "location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "stock_movements_tenant_id_variant_id_fkey"
+            columns: ["tenant_id", "variant_id"]
+            isOneToOne: false
+            referencedRelation: "product_variants"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "stock_movements_tenant_id_variant_id_fkey"
+            columns: ["tenant_id", "variant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_availability"
+            referencedColumns: ["tenant_id", "variant_id"]
+          },
+          {
+            foreignKeyName: "stock_movements_tenant_id_variant_id_fkey"
+            columns: ["tenant_id", "variant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_variants"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
       storefront_themes: {
         Row: {
           colors: Json
@@ -1077,6 +1258,70 @@ export type Database = {
       }
     }
     Views: {
+      inventory_overview: {
+        Row: {
+          available: number | null
+          id: string | null
+          incoming: number | null
+          is_low: boolean | null
+          location_id: string | null
+          location_name: string | null
+          low_stock_threshold: number | null
+          on_hand: number | null
+          price_centavos: number | null
+          product_id: string | null
+          product_name: string | null
+          reserved: number | null
+          sku: string | null
+          tenant_id: string | null
+          updated_at: string | null
+          variant_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "inventory_levels_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_levels_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "inventory_levels_tenant_id_location_id_fkey"
+            columns: ["tenant_id", "location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "inventory_levels_tenant_id_variant_id_fkey"
+            columns: ["tenant_id", "variant_id"]
+            isOneToOne: false
+            referencedRelation: "product_variants"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "inventory_levels_tenant_id_variant_id_fkey"
+            columns: ["tenant_id", "variant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_availability"
+            referencedColumns: ["tenant_id", "variant_id"]
+          },
+          {
+            foreignKeyName: "inventory_levels_tenant_id_variant_id_fkey"
+            columns: ["tenant_id", "variant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_variants"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
       psgc_address_units: {
         Row: {
           barangay_code: string | null
@@ -1094,6 +1339,45 @@ export type Database = {
           region_numeral: string | null
         }
         Relationships: []
+      }
+      storefront_availability: {
+        Row: {
+          in_stock: boolean | null
+          product_id: string | null
+          stock_state: string | null
+          tenant_id: string | null
+          variant_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_variants_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_variants_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_variants_tenant_id_product_id_fkey"
+            columns: ["tenant_id", "product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "product_variants_tenant_id_product_id_fkey"
+            columns: ["tenant_id", "product_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_products"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
       }
       storefront_product_images: {
         Row: {
@@ -1262,6 +1546,10 @@ export type Database = {
         Args: { p_variant_id: string }
         Returns: undefined
       }
+      available_stock: {
+        Args: { p_on_hand: number; p_reserved: number }
+        Returns: number
+      }
       catalog_slugify: { Args: { p_text: string }; Returns: string }
       create_tenant: {
         Args: { p_name: string; p_slug: string }
@@ -1309,9 +1597,56 @@ export type Database = {
           status: string
         }[]
       }
+      record_stock_movement: {
+        Args: {
+          p_delta: number
+          p_location_id: string
+          p_note?: string
+          p_reason: string
+          p_reference_id?: string
+          p_reference_type?: string
+          p_tenant_id: string
+          p_variant_id: string
+        }
+        Returns: string
+      }
+      release_reservation: {
+        Args: { p_items: Json; p_location_id: string; p_tenant_id: string }
+        Returns: undefined
+      }
+      reserve_stock: {
+        Args: {
+          p_items: Json
+          p_location_id: string
+          p_reference_id?: string
+          p_reference_type?: string
+          p_tenant_id: string
+        }
+        Returns: undefined
+      }
       seed_categories_from_presets: {
         Args: { p_names: string[]; p_tenant_id: string }
         Returns: number
+      }
+      set_stock_level: {
+        Args: {
+          p_location_id: string
+          p_note?: string
+          p_on_hand: number
+          p_tenant_id: string
+          p_variant_id: string
+        }
+        Returns: undefined
+      }
+      ship_reservation: {
+        Args: {
+          p_items: Json
+          p_location_id: string
+          p_reference_id?: string
+          p_reference_type?: string
+          p_tenant_id: string
+        }
+        Returns: undefined
       }
       storage_path_tenant_id: { Args: { p_name: string }; Returns: string }
       tenant_role_of: {

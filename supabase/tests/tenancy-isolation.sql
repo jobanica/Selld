@@ -1074,6 +1074,195 @@ reset role;
 set local role authenticated;
 
 -- ---------------------------------------------------------------------------
+-- Phase 4 tables — inventory
+-- ---------------------------------------------------------------------------
+\echo ''
+\echo '=== Inventory (levels, ledger)'
+
+reset role;
+set local role authenticated;
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+
+do $$
+declare i record; v uuid; loc uuid;
+begin
+  select * into i from tests.ids;
+  select id into loc from public.locations where tenant_id = i.rhea_tenant and is_default;
+  select id into v from public.product_variants where tenant_id = i.rhea_tenant limit 1;
+
+  -- Stock arrives through the ledger; there is no other way in.
+  perform public.record_stock_movement(i.rhea_tenant, v, loc, 20, 'receive', 'first delivery');
+  perform tests.eq(
+    (select on_hand from public.inventory_levels where variant_id = v and location_id = loc),
+    20, 'a receive movement created the level row and set on_hand');
+  perform tests.eq(
+    (select count(*)::int from public.stock_movements where variant_id = v), 1,
+    'and left exactly one ledger entry');
+
+  -- Reserve, then check the arithmetic a buyer actually depends on.
+  perform public.reserve_stock(i.rhea_tenant, loc,
+    jsonb_build_array(jsonb_build_object('variant_id', v, 'qty', 5)));
+  perform tests.eq(
+    (select reserved from public.inventory_levels where variant_id = v), 5,
+    'reserving moved 5 units into reserved');
+  perform tests.eq(
+    (select on_hand from public.inventory_levels where variant_id = v), 20,
+    'and did NOT touch on_hand — a reservation is not a movement');
+  perform tests.eq(
+    (select available from public.inventory_overview where variant_id = v), 15,
+    'available = on_hand - reserved');
+
+  -- The oversell guard, single-threaded. (The real race lives in
+  -- scripts/db-concurrency-test.ts, which needs parallel connections.)
+  perform tests.rejects(format(
+    $q$ select public.reserve_stock(%L, %L, jsonb_build_array(jsonb_build_object('variant_id', %L, 'qty', 16))) $q$,
+    i.rhea_tenant, loc, v),
+    'reserving more than available is refused');
+
+  -- Shipping converts a reservation into a sale, in one transaction.
+  perform public.ship_reservation(i.rhea_tenant, loc,
+    jsonb_build_array(jsonb_build_object('variant_id', v, 'qty', 5)));
+  perform tests.eq(
+    (select on_hand from public.inventory_levels where variant_id = v), 15,
+    'shipping reduced on_hand');
+  perform tests.eq(
+    (select reserved from public.inventory_levels where variant_id = v), 0,
+    'and cleared the reservation');
+
+  -- The invariant that makes the ledger trustworthy.
+  perform tests.eq(
+    (select coalesce(sum(delta), 0)::int from public.stock_movements where variant_id = v),
+    (select on_hand from public.inventory_levels where variant_id = v),
+    'on_hand equals the sum of its movements');
+
+  -- A movement that would take stock below what is committed must fail.
+  perform public.reserve_stock(i.rhea_tenant, loc,
+    jsonb_build_array(jsonb_build_object('variant_id', v, 'qty', 15)));
+  perform tests.rejects(format(
+    $q$ select public.record_stock_movement(%L, %L, %L, -1, 'damage', 'breaks the reservation') $q$,
+    i.rhea_tenant, v, loc),
+    'stock cannot drop below what is already reserved');
+  perform public.release_reservation(i.rhea_tenant, loc,
+    jsonb_build_array(jsonb_build_object('variant_id', v, 'qty', 15)));
+
+  -- Nor below zero.
+  perform tests.rejects(format(
+    $q$ select public.record_stock_movement(%L, %L, %L, -999, 'damage', 'too much') $q$,
+    i.rhea_tenant, v, loc),
+    'stock cannot go negative');
+
+  -- A double release must not manufacture availability.
+  perform public.release_reservation(i.rhea_tenant, loc,
+    jsonb_build_array(jsonb_build_object('variant_id', v, 'qty', 100)));
+  perform tests.eq(
+    (select reserved from public.inventory_levels where variant_id = v), 0,
+    'over-releasing floors reserved at zero rather than going negative');
+
+  -- Direct writes to the derived column, and to the ledger, are refused.
+  perform tests.rejects(format(
+    $q$ update public.inventory_levels set on_hand = 999 where variant_id = %L $q$, v),
+    'on_hand cannot be written directly — it is derived from the ledger');
+  perform tests.rejects(format(
+    $q$ update public.stock_movements set delta = 0 where variant_id = %L $q$, v),
+    'the ledger is append-only');
+end;
+$$;
+
+-- Cross-tenant: stock levels are commercially sensitive.
+select tests.login('22222222-2222-2222-2222-222222222222', 'marlon@example.ph');
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+  perform tests.eq((select count(*)::int from public.inventory_levels), 0,
+    'Marlon cannot see Rhea''s stock levels');
+  perform tests.eq((select count(*)::int from public.stock_movements), 0,
+    'Marlon cannot read Rhea''s stock history');
+  perform tests.eq((select count(*)::int from public.inventory_overview), 0,
+    'nor through the overview view');
+
+  perform tests.eq(
+    tests.affected(format(
+      $q$ update public.inventory_levels set low_stock_threshold = 1 where tenant_id = %L $q$,
+      i.rhea_tenant)),
+    0::bigint, 'Marlon cannot change Rhea''s thresholds');
+end;
+$$;
+
+-- A non-member cannot reserve against another tenant's stock.
+do $$
+declare i record; v uuid; loc uuid;
+begin
+  select * into i from tests.ids;
+  reset role;
+  select id into loc from public.locations where tenant_id = i.rhea_tenant and is_default;
+  select id into v from public.product_variants where tenant_id = i.rhea_tenant limit 1;
+  set local role authenticated;
+
+  perform tests.rejects(format(
+    $q$ select public.reserve_stock(%L, %L, jsonb_build_array(jsonb_build_object('variant_id', %L, 'qty', 1))) $q$,
+    i.rhea_tenant, loc, v),
+    'a non-member cannot reserve another tenant''s stock');
+  perform tests.rejects(format(
+    $q$ select public.record_stock_movement(%L, %L, %L, 5, 'receive') $q$,
+    i.rhea_tenant, v, loc),
+    'a non-member cannot add stock to another tenant');
+end;
+$$;
+
+-- Role enforcement: a packer reads stock and ships, but does not decide quantities.
+select tests.login('33333333-3333-3333-3333-333333333333', 'jess@example.ph');
+do $$
+declare i record; v uuid; loc uuid;
+begin
+  select * into i from tests.ids;
+  reset role;
+  select id into loc from public.locations where tenant_id = i.rhea_tenant and is_default;
+  select id into v from public.product_variants where tenant_id = i.rhea_tenant limit 1;
+  set local role authenticated;
+
+  perform tests.ok((select count(*) from public.inventory_levels) >= 1,
+    'a packer can read stock levels');
+  perform tests.rejects(format(
+    $q$ select public.record_stock_movement(%L, %L, %L, 10, 'receive') $q$,
+    i.rhea_tenant, v, loc),
+    'a packer cannot adjust stock');
+  perform tests.eq(
+    tests.affected(format(
+      $q$ update public.inventory_levels set low_stock_threshold = 99 where tenant_id = %L $q$,
+      i.rhea_tenant)),
+    0::bigint, 'a packer cannot change thresholds');
+end;
+$$;
+
+-- Buyers see whether something is buyable, never how much of it there is.
+reset role;
+set local role anon;
+select tests.logout();
+do $$
+declare v_columns text[];
+begin
+  perform tests.rejects($q$ select count(*) from public.inventory_levels $q$,
+    'anon has no privilege on inventory_levels');
+  perform tests.rejects($q$ select count(*) from public.stock_movements $q$,
+    'anon cannot read the stock ledger');
+  perform tests.rejects($q$ select count(*) from public.inventory_overview $q$,
+    'anon cannot read the inventory overview');
+
+  select array_agg(column_name order by column_name) into v_columns
+  from information_schema.columns
+  where table_schema = 'public' and table_name = 'storefront_availability';
+  perform tests.eq(v_columns,
+    array['in_stock', 'product_id', 'stock_state', 'tenant_id', 'variant_id'],
+    'storefront_availability exposes a boolean and a bucket, never a count');
+  perform tests.ok(not ('on_hand' = any (v_columns)), 'and definitely not on_hand');
+end;
+$$;
+
+reset role;
+set local role authenticated;
+
+-- ---------------------------------------------------------------------------
 -- my_tenants()
 -- ---------------------------------------------------------------------------
 \echo ''
@@ -1110,8 +1299,8 @@ declare v_passed int := coalesce(nullif(current_setting('tests.passed', true), '
 begin
   raise notice '';
   raise notice '=== % assertions passed', v_passed;
-  if v_passed < 125 then
-    raise exception 'Expected at least 125 assertions, only % ran — did a section get skipped?', v_passed
+  if v_passed < 155 then
+    raise exception 'Expected at least 155 assertions, only % ran — did a section get skipped?', v_passed
       using errcode = 'triggered_action_exception';
   end if;
 end;

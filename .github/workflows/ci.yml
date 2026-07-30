@@ -76,6 +76,26 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # `pg_isready` (the service health check) goes true before the image finishes
+      # installing extension files, so applying migrations immediately after it can
+      # fail on a missing pg_trgm. Gate on something that proves the instance is
+      # actually usable. This bit us locally; without the gate it is a CI flake that
+      # only appears under load.
+      - name: Wait for Postgres to be genuinely ready
+        env:
+          PGPASSWORD: postgres
+        run: |
+          for _ in $(seq 1 30); do
+            if psql -h 127.0.0.1 -p 54322 -U postgres -qtAc \
+                 "select 1 from pg_available_extensions where name = 'pg_trgm'" | grep -q 1; then
+              echo "Postgres ready."
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "::error::Postgres did not become ready in time."
+          exit 1
+
       - name: Apply migrations in order
         env:
           PGPASSWORD: postgres
@@ -120,6 +140,15 @@ jobs:
         env:
           SUPABASE_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
         run: pnpm db:test
+
+      # Phase 4's done-when: two concurrent checkouts for the last unit, exactly one
+      # succeeds. Runs real parallel connections, because overselling is a problem
+      # that only exists between simultaneous ones — a single session can simulate
+      # the race but never reproduce it.
+      - name: Inventory concurrency tests (oversell prevention)
+        env:
+          SUPABASE_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+        run: pnpm db:test:concurrency
 
       # Guard against the checked-in types drifting from the migrations. If this
       # fails, someone forgot `pnpm db:types` and the client types are lying.

@@ -5,7 +5,7 @@
 Multi-tenant ecommerce + order operations platform for Philippine social sellers.
 Working name: **Selld** (`selld.ph` / `selld.store`).
 
-> **Status: phase 3 (Catalog) complete.** Next: phase 4, inventory.
+> **Status: phase 4 (Inventory) complete.** Next: phase 5, storefront.
 > See [`docs/phase-status.md`](docs/phase-status.md).
 
 ---
@@ -52,6 +52,7 @@ pnpm db:test           # RLS isolation suite — needs a running database
 | `pnpm db:new <name>` | Scaffold a migration |
 | `pnpm db:types` | Regenerate `database.types.ts` — after **every** migration |
 | `pnpm db:test` | Run `supabase/tests/*.sql` — the RLS isolation suite |
+| `pnpm db:test:concurrency` | Oversell prevention, with real parallel connections |
 | `pnpm psgc:build` | Refetch PSGC from the PSA mirror (only when PSA publishes an update) |
 | `pnpm psgc:seed` | Load `supabase/seed/psgc.json.gz` into the database |
 
@@ -64,7 +65,7 @@ src/
   app/           ← dashboard (authenticated seller surface)
   storefront/    ← public buyer surface, separate perf budget
   features/      ← feature slices
-    address/  auth/  catalog/  onboarding/  tenancy/
+    address/  auth/  catalog/  inventory/  onboarding/  tenancy/
   lib/           ← money, phone, psgc, i18n, time, supabase, tenant
   components/ui  ← shadcn/ui primitives
 supabase/
@@ -108,10 +109,18 @@ naive UTC date splits one Manila morning across two buckets.
 **Tenant isolation is enforced in the database, not the client.** Every
 tenant-scoped policy funnels through `is_tenant_member(tenant_id)`, and
 [`supabase/tests/tenancy-isolation.sql`](supabase/tests/tenancy-isolation.sql)
-proves cross-tenant reads and writes return nothing — 129 assertions, run in CI on
+proves cross-tenant reads and writes return nothing — 157 assertions, run in CI on
 every PR. The suite is verified by sabotage: break RLS and it fails. Read the
 "Writing a tenant-scoped table" section of [`CLAUDE.md`](CLAUDE.md) before adding
 a table.
+
+**Stock cannot be oversold, and the number is always explainable.** The movement
+ledger is the source of truth and `on_hand` is a trigger-maintained cache, so
+`sum(delta) = on_hand` holds by construction. Overselling is blocked by two
+independent layers — sorted advisory locks in `reserve_stock()` and a
+`reserved <= on_hand` CHECK constraint — and
+[`scripts/db-concurrency-test.ts`](scripts/db-concurrency-test.ts) proves each one
+separately with real parallel connections.
 
 **Providers are interfaces first.** Adding a fifth courier should touch one new
 file and one registry line, and zero lines of order logic.
