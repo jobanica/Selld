@@ -99,3 +99,28 @@ export function isValidSlug(slug: string): boolean {
 export function isReservedSlug(slug: string): boolean {
   return RESERVED_SUBDOMAINS.has(slug.toLowerCase())
 }
+
+/**
+ * Suggest a slug from a store name: `"Rhea's Finds"` -> `"rheas-finds"`.
+ *
+ * Strips diacritics first so `"Niño's Kicks"` becomes `ninos-kicks` rather than
+ * losing the character — Filipino store names routinely contain ñ, and dropping
+ * it silently produces `nio-s-kicks`.
+ *
+ * Advisory only: `isValidSlug` still decides, and the database has the final say
+ * via its own constraint.
+ */
+export function slugify(name: string): string {
+  return name
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    // Drop apostrophes rather than treating them as separators, so the very
+    // common possessive store name reads correctly: "Rhea's Finds" must become
+    // `rheas-finds`, not `rhea-s-finds`.
+    .replace(/['\u2019\u02bc`]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 63)
+    .replace(/-+$/g, '')
+}

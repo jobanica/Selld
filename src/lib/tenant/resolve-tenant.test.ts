@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 
-import { isReservedSlug, isValidSlug, resolveSurface } from './resolve-tenant'
+import { isReservedSlug, isValidSlug, resolveSurface, slugify } from './resolve-tenant'
 
 const options = { rootDomain: 'selld.ph' }
 
@@ -94,5 +94,41 @@ describe('isReservedSlug()', () => {
     expect(isReservedSlug('app')).toBe(true)
     expect(isReservedSlug('ADMIN')).toBe(true)
     expect(isReservedSlug('rhea')).toBe(false)
+  })
+})
+
+describe('slugify()', () => {
+  it('suggests a slug from a store name', () => {
+    expect(slugify("Rhea's Finds")).toBe('rheas-finds')
+    expect(slugify('Marlon Kicks PH')).toBe('marlon-kicks-ph')
+    expect(slugify('  Double  Spaces  ')).toBe('double-spaces')
+  })
+
+  it('keeps Filipino names legible instead of mangling them', () => {
+    // ñ is common in PH store names. Naively stripping non-ASCII would yield
+    // "nio-s-kicks"; decomposing first keeps the letter.
+    expect(slugify("Niño's Kicks")).toBe('ninos-kicks')
+    expect(slugify('Señora Beauty')).toBe('senora-beauty')
+    expect(slugify('Café Manila')).toBe('cafe-manila')
+  })
+
+  it('produces something isValidSlug accepts, or nothing at all', () => {
+    for (const name of ["Rhea's Finds", 'Niño', 'ABC', '123 Store', 'Tindahan ni Aling Nena']) {
+      const slug = slugify(name)
+      expect(isValidSlug(slug), `${name} -> ${slug}`).toBe(true)
+    }
+  })
+
+  it('never emits a leading or trailing hyphen', () => {
+    expect(slugify('!!! Store !!!')).toBe('store')
+    expect(slugify('---')).toBe('')
+    expect(slugify('')).toBe('')
+  })
+
+  it('truncates to a valid DNS label length without a trailing hyphen', () => {
+    const slug = slugify(`${'a'.repeat(62)} b`)
+    expect(slug.length).toBeLessThanOrEqual(63)
+    expect(slug.endsWith('-')).toBe(false)
+    expect(isValidSlug(slug)).toBe(true)
   })
 })

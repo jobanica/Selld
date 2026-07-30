@@ -5,7 +5,7 @@ Build one phase per session, in order. The full roadmap is in
 [`docs/build-spec.md`](docs/build-spec.md); who we're building for is in
 [`docs/avatar.md`](docs/avatar.md).
 
-**Current state: phase 0 complete.** Next up is phase 1 (auth & multi-tenant core).
+**Current state: phase 1 complete.** Next up is phase 2 (store onboarding wizard).
 
 ---
 
@@ -21,6 +21,7 @@ pnpm db:start         # Supabase local stack (needs Docker)
 pnpm db:reset         # reset + re-run migrations, then reseed PSGC
 pnpm db:new <name>    # scaffold a migration
 pnpm db:types         # regenerate src/lib/supabase/database.types.ts — after EVERY migration
+pnpm db:test          # run supabase/tests/*.sql (RLS isolation). Needs a database.
 
 pnpm psgc:build       # refetch PSGC from the PSA mirror (only when PSA publishes an update)
 pnpm psgc:seed        # load supabase/seed/psgc.json.gz into the database
@@ -48,18 +49,83 @@ pnpm psgc:seed        # load supabase/seed/psgc.json.gz into the database
    exponential backoff, and logged to `integration_logs`.** Use
    `src/core/integration`.
 
+## Writing a tenant-scoped table (do this every time)
+
+The security boundary is `public.is_tenant_member(tenant_id)` — **not**
+`current_tenant_id()`. Policies ask "is the caller a member of the tenant that owns
+this row?", which the client cannot influence. `current_tenant_id()` is for
+defaults only; it validates membership before returning anything, so a spoofed
+`x-selld-tenant` header can at worst return one of the caller's own tenants.
+
+```sql
+create table public.widgets (
+  id        uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references public.tenants (id) on delete cascade,
+  ...
+);
+create index widgets_tenant_idx on public.widgets (tenant_id);
+
+alter table public.widgets enable row level security;
+alter table public.widgets force  row level security;
+
+create policy "Members read widgets"   on public.widgets for select to authenticated
+  using (public.is_tenant_member(tenant_id));
+create policy "Staff write widgets"    on public.widgets for insert to authenticated
+  with check (public.has_tenant_role(tenant_id, 'staff'));
+-- update needs BOTH using and with check, or a row can be moved to another tenant.
+create policy "Staff update widgets"   on public.widgets for update to authenticated
+  using (public.has_tenant_role(tenant_id, 'staff'))
+  with check (public.has_tenant_role(tenant_id, 'staff'));
+
+grant select, insert, update, delete on public.widgets to authenticated;
+```
+
+Then **add assertions to `supabase/tests/tenancy-isolation.sql`** for the new
+table. The suite is the thing standing between us and a cross-tenant leak, and it
+only covers what it is told about.
+
+Gotchas learned the hard way:
+
+- **RLS helpers must be `SECURITY DEFINER` with `search_path = ''`.** A policy on
+  `tenant_members` that queried `tenant_members` directly would recurse forever.
+  This works because the `postgres` role has `BYPASSRLS`, which is why
+  `FORCE ROW LEVEL SECURITY` does not break it.
+- **`UPDATE`/`DELETE` blocked by RLS affect zero rows — they do not raise.** Assert
+  on the row count, not on an exception. `INSERT` violating `WITH CHECK` does raise.
+- **Point user FKs at `public.profiles(id)`, not `auth.users(id)`.** Same cascade
+  behaviour (profiles cascades from auth.users), but one unambiguous FK, which is
+  what lets PostgREST embed `profiles(...)`.
+- **`auth.users` has no `phone` column** in the Postgres image CI runs. Read phone
+  from `raw_user_meta_data` instead or the migration fails there.
+- **Never expose a bearer token through a `SELECT` policy.** `invitations.token` has
+  no read policy at all; redemption goes through `accept_invitation()`, which also
+  checks the token was issued to the caller's own email.
+
 ## Architecture
 
 ```
 src/
+  App.tsx       ← picks a surface by hostname, lazy-loads it
   core/         ← extraction boundary; becomes @yourorg/ph-commerce-core
     couriers/ payments/ sms/ marketplaces/ tenancy/ integration/
   app/          ← dashboard (authenticated seller surface)
   storefront/   ← public buyer surface, own perf budget
   features/     ← feature slices; may import from core and lib
+    auth/ tenancy/
   lib/          ← money, phone, psgc, i18n, time, supabase, tenant
   components/ui ← shadcn/ui primitives
 ```
+
+**The two surfaces are separate chunks.** `dashboard-app.tsx` and
+`storefront-app.tsx` are lazy-loaded, so a buyer on `{slug}.selld.ph` never
+downloads auth, tenancy, or the dashboard shell. Keep it that way — the storefront
+carries a hard LCP < 2.0s on 3G budget. Adding a dashboard import to
+`src/storefront/**` silently spends a buyer's mobile data.
+
+**Provider/context/hook split.** Each of these lives in its own file
+(`session-context.ts`, `session-provider.tsx`, `use-session.ts`) because
+`react-refresh/only-export-components` requires a module to export components
+*or* other things, not both. Follow the pattern for new contexts.
 
 **Dependency direction points inward.** `src/core` must not import from `app`,
 `storefront`, or `features`, and must contain no React. See

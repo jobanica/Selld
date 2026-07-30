@@ -1,8 +1,17 @@
-import i18next from 'i18next'
+import i18next, { type TFunction } from 'i18next'
 import { initReactI18next } from 'react-i18next'
 
 import { en } from './locales/en'
 import { tl } from './locales/tl'
+
+/**
+ * The `t` function's type, for helpers that take it as a parameter.
+ *
+ * Typing such a parameter as `(key: string) => string` looks harmless but throws
+ * away the key checking that makes a typo a compile error, and TypeScript rejects
+ * the assignment anyway because the real signature is narrower.
+ */
+export type Translate = TFunction<'common'>
 
 export const SUPPORTED_LOCALES = ['en', 'tl'] as const
 export type Locale = (typeof SUPPORTED_LOCALES)[number]

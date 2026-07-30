@@ -41,8 +41,8 @@ jobs:
       - name: Build
         run: pnpm build
 
-  migrations:
-    name: Migrations apply to a clean database
+  database:
+    name: Migrations + RLS isolation tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -112,3 +112,26 @@ jobs:
             end
             \$\$;
           "
+
+      # Phase 1's done-when: two tenants exist and neither can read a single row
+      # of the other's data. Runs on every PR because a policy is trivially easy
+      # to widen by accident and the failure mode is a cross-tenant data leak.
+      - name: Tenancy isolation tests (RLS)
+        env:
+          SUPABASE_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+        run: pnpm db:test
+
+      # Guard against the checked-in types drifting from the migrations. If this
+      # fails, someone forgot `pnpm db:types` and the client types are lying.
+      - name: database.types.ts matches the migrations
+        run: |
+          pnpm supabase gen types typescript \
+            --db-url postgresql://postgres:postgres@127.0.0.1:54322/postgres \
+            > /tmp/generated.types.ts
+          # Strip our hand-written header before comparing.
+          tail -n +10 src/lib/supabase/database.types.ts > /tmp/committed.types.ts
+          if ! diff -u /tmp/committed.types.ts /tmp/generated.types.ts; then
+            echo "::error::src/lib/supabase/database.types.ts is stale. Run: pnpm db:types"
+            exit 1
+          fi
+          echo "database.types.ts is up to date."

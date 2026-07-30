@@ -5,8 +5,8 @@
 Multi-tenant ecommerce + order operations platform for Philippine social sellers.
 Working name: **Selld** (`selld.ph` / `selld.store`).
 
-> **Status: phase 0 (Foundation) complete.** Next: phase 1, auth & multi-tenant core.
-> See [`docs/phase-status.md`](docs/phase-status.md).
+> **Status: phase 1 (Auth & multi-tenant core) complete.** Next: phase 2, store
+> onboarding wizard. See [`docs/phase-status.md`](docs/phase-status.md).
 
 ---
 
@@ -35,7 +35,10 @@ storefront; `http://localhost:5173` serves the dashboard.
 
 ```bash
 pnpm verify            # typecheck + lint + test + build
+pnpm db:test           # RLS isolation suite — needs a running database
 ```
+
+`verify` deliberately excludes `db:test`, which requires Postgres. CI runs both.
 
 ## Commands
 
@@ -48,6 +51,7 @@ pnpm verify            # typecheck + lint + test + build
 | `pnpm db:reset` | Re-run migrations, then reseed PSGC |
 | `pnpm db:new <name>` | Scaffold a migration |
 | `pnpm db:types` | Regenerate `database.types.ts` — after **every** migration |
+| `pnpm db:test` | Run `supabase/tests/*.sql` — the RLS isolation suite |
 | `pnpm psgc:build` | Refetch PSGC from the PSA mirror (only when PSA publishes an update) |
 | `pnpm psgc:seed` | Load `supabase/seed/psgc.json.gz` into the database |
 
@@ -60,13 +64,19 @@ src/
   app/           ← dashboard (authenticated seller surface)
   storefront/    ← public buyer surface, separate perf budget
   features/      ← feature slices
+    auth/        tenancy/
   lib/           ← money, phone, psgc, i18n, time, supabase, tenant
   components/ui  ← shadcn/ui primitives
 supabase/
   migrations/    ← append-only once pushed
   seed/          ← PSGC reference data (committed, 380 KB gzipped)
-scripts/         ← PSGC fetch + seed pipeline
+  tests/         ← SQL suites; the RLS isolation proof lives here
+scripts/         ← PSGC pipeline + SQL test runner
 ```
+
+The dashboard and storefront are **lazy-loaded as separate chunks**, so a buyer on
+`{slug}.selld.ph` never downloads auth, tenancy, or the dashboard shell (88 KB
+gzipped vs 190 KB).
 
 Dependencies point inward: `src/core` imports nothing from `app`, `storefront`, or
 `features`, and contains no React. See [`src/core/README.md`](src/core/README.md).
@@ -93,6 +103,14 @@ a PH address without one is not deliverable. Two structural quirks are handled i
 **Time is UTC in, Manila out.** [`src/lib/time/manila`](src/lib/time/manila.ts)
 exists because "today's orders" and the daily COD cutoff must be Manila days — a
 naive UTC date splits one Manila morning across two buckets.
+
+**Tenant isolation is enforced in the database, not the client.** Every
+tenant-scoped policy funnels through `is_tenant_member(tenant_id)`, and
+[`supabase/tests/tenancy-isolation.sql`](supabase/tests/tenancy-isolation.sql)
+proves cross-tenant reads and writes return nothing — 79 assertions, run in CI on
+every PR. The suite is verified by sabotage: break RLS and it fails. Read the
+"Writing a tenant-scoped table" section of [`CLAUDE.md`](CLAUDE.md) before adding
+a table.
 
 **Providers are interfaces first.** Adding a fifth courier should touch one new
 file and one registry line, and zero lines of order logic.

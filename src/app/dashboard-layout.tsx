@@ -6,6 +6,8 @@ import { NavLink, Outlet } from 'react-router-dom'
 import { LocaleSwitcher } from '@/components/locale-switcher'
 import { Button } from '@/components/ui/button'
 import { NAV_SECTIONS } from '@/app/navigation'
+import { UserMenu } from '@/features/auth/user-menu'
+import { TenantSwitcher } from '@/features/tenancy/tenant-switcher'
 import { cn } from '@/lib/utils'
 
 /**
@@ -51,15 +53,24 @@ export function DashboardLayout() {
           {drawerOpen ? <X aria-hidden="true" /> : <Menu aria-hidden="true" />}
         </Button>
 
-        <NavLink to="/" className="flex items-center gap-2 font-semibold tracking-tight">
+        <NavLink
+          to="/"
+          className="flex shrink-0 items-center gap-2 font-semibold tracking-tight"
+        >
           <span className="grid size-7 place-items-center rounded-md bg-primary text-primary-foreground">
             <Store className="size-4" aria-hidden="true" />
           </span>
-          <span>{t('app.name')}</span>
+          {/* The wordmark yields to the store name on narrow screens. */}
+          <span className="hidden sm:inline">{t('app.name')}</span>
         </NavLink>
 
-        <div className="ml-auto flex items-center gap-1">
+        <div className="min-w-0 flex-1">
+          <TenantSwitcher />
+        </div>
+
+        <div className="flex shrink-0 items-center gap-1">
           <LocaleSwitcher />
+          <UserMenu />
         </div>
       </header>
 

@@ -43,6 +43,94 @@ export type Database = {
   }
   public: {
     Tables: {
+      invitations: {
+        Row: {
+          accepted_at: string | null
+          created_at: string
+          email: string
+          expires_at: string
+          id: string
+          invited_by: string | null
+          role: Database["public"]["Enums"]["tenant_role"]
+          tenant_id: string
+          token: string
+          updated_at: string
+        }
+        Insert: {
+          accepted_at?: string | null
+          created_at?: string
+          email: string
+          expires_at?: string
+          id?: string
+          invited_by?: string | null
+          role?: Database["public"]["Enums"]["tenant_role"]
+          tenant_id: string
+          token?: string
+          updated_at?: string
+        }
+        Update: {
+          accepted_at?: string | null
+          created_at?: string
+          email?: string
+          expires_at?: string
+          id?: string
+          invited_by?: string | null
+          role?: Database["public"]["Enums"]["tenant_role"]
+          tenant_id?: string
+          token?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "invitations_invited_by_fkey"
+            columns: ["invited_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invitations_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "invitations_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          avatar_path: string | null
+          created_at: string
+          full_name: string | null
+          id: string
+          phone: string | null
+          updated_at: string
+        }
+        Insert: {
+          avatar_path?: string | null
+          created_at?: string
+          full_name?: string | null
+          id: string
+          phone?: string | null
+          updated_at?: string
+        }
+        Update: {
+          avatar_path?: string | null
+          created_at?: string
+          full_name?: string | null
+          id?: string
+          phone?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
       psgc_barangays: {
         Row: {
           city_code: string
@@ -244,6 +332,103 @@ export type Database = {
         }
         Relationships: []
       }
+      tenant_members: {
+        Row: {
+          accepted_at: string | null
+          created_at: string
+          id: string
+          invited_at: string | null
+          role: Database["public"]["Enums"]["tenant_role"]
+          tenant_id: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          accepted_at?: string | null
+          created_at?: string
+          id?: string
+          invited_at?: string | null
+          role?: Database["public"]["Enums"]["tenant_role"]
+          tenant_id: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          accepted_at?: string | null
+          created_at?: string
+          id?: string
+          invited_at?: string | null
+          role?: Database["public"]["Enums"]["tenant_role"]
+          tenant_id?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_members_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tenant_members_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tenant_members_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tenants: {
+        Row: {
+          brand_color: string | null
+          created_at: string
+          custom_domain: string | null
+          id: string
+          locale: string
+          logo_path: string | null
+          name: string
+          slug: string
+          status: string
+          timezone: string
+          updated_at: string
+        }
+        Insert: {
+          brand_color?: string | null
+          created_at?: string
+          custom_domain?: string | null
+          id?: string
+          locale?: string
+          logo_path?: string | null
+          name: string
+          slug: string
+          status?: string
+          timezone?: string
+          updated_at?: string
+        }
+        Update: {
+          brand_color?: string | null
+          created_at?: string
+          custom_domain?: string | null
+          id?: string
+          locale?: string
+          logo_path?: string | null
+          name?: string
+          slug?: string
+          status?: string
+          timezone?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       psgc_address_units: {
@@ -264,12 +449,114 @@ export type Database = {
         }
         Relationships: []
       }
+      storefront_tenants: {
+        Row: {
+          brand_color: string | null
+          custom_domain: string | null
+          id: string | null
+          locale: string | null
+          logo_path: string | null
+          name: string | null
+          slug: string | null
+        }
+        Insert: {
+          brand_color?: string | null
+          custom_domain?: string | null
+          id?: string | null
+          locale?: string | null
+          logo_path?: string | null
+          name?: string | null
+          slug?: string | null
+        }
+        Update: {
+          brand_color?: string | null
+          custom_domain?: string | null
+          id?: string | null
+          locale?: string | null
+          logo_path?: string | null
+          name?: string | null
+          slug?: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
-      [_ in never]: never
+      accept_invitation: {
+        Args: { p_token: string }
+        Returns: {
+          accepted_at: string | null
+          created_at: string
+          id: string
+          invited_at: string | null
+          role: Database["public"]["Enums"]["tenant_role"]
+          tenant_id: string
+          updated_at: string
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "tenant_members"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      create_tenant: {
+        Args: { p_name: string; p_slug: string }
+        Returns: {
+          brand_color: string | null
+          created_at: string
+          custom_domain: string | null
+          id: string
+          locale: string
+          logo_path: string | null
+          name: string
+          slug: string
+          status: string
+          timezone: string
+          updated_at: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "tenants"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      current_tenant_id: { Args: never; Returns: string }
+      has_tenant_role: {
+        Args: {
+          p_min_role: Database["public"]["Enums"]["tenant_role"]
+          p_tenant_id: string
+        }
+        Returns: boolean
+      }
+      is_reserved_tenant_slug: { Args: { slug: string }; Returns: boolean }
+      is_tenant_member: { Args: { p_tenant_id: string }; Returns: boolean }
+      is_valid_tenant_slug: { Args: { slug: string }; Returns: boolean }
+      my_tenants: {
+        Args: never
+        Returns: {
+          brand_color: string
+          id: string
+          joined_at: string
+          logo_path: string
+          name: string
+          role: Database["public"]["Enums"]["tenant_role"]
+          slug: string
+          status: string
+        }[]
+      }
+      tenant_role_of: {
+        Args: { p_tenant_id: string }
+        Returns: Database["public"]["Enums"]["tenant_role"]
+      }
+      tenant_role_rank: {
+        Args: { role: Database["public"]["Enums"]["tenant_role"] }
+        Returns: number
+      }
     }
     Enums: {
-      [_ in never]: never
+      tenant_role: "owner" | "admin" | "staff" | "packer" | "rider"
     }
     CompositeTypes: {
       [_ in never]: never
@@ -399,7 +686,9 @@ export const Constants = {
     Enums: {},
   },
   public: {
-    Enums: {},
+    Enums: {
+      tenant_role: ["owner", "admin", "staff", "packer", "rider"],
+    },
   },
 } as const
 

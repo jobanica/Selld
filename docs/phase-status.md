@@ -6,8 +6,8 @@ phase's scope and done-when criteria.
 | Phase | Name | Status |
 |---:|---|---|
 | 0 | Foundation | ✅ Complete |
-| 1 | Auth & multi-tenant core | ⬜ Next |
-| 2 | Store onboarding wizard | ⬜ |
+| 1 | Auth & multi-tenant core | ✅ Complete |
+| 2 | Store onboarding wizard | ⬜ Next |
 | 3 | Catalog | ⬜ |
 | 4 | Inventory | ⬜ |
 | 5 | Storefront | ⬜ |
@@ -29,6 +29,81 @@ phase's scope and done-when criteria.
 
 Phases 0–9 are a complete sellable product. MVP for first paying customers is
 0 → 11.
+
+---
+
+## Phase 1 — Auth & multi-tenant core ✅
+
+**Done-when criterion**
+
+> Two tenants exist and neither can read a single row of the other's data — prove
+> it with SQL tests.
+
+✅ Proven by [`supabase/tests/tenancy-isolation.sql`](../supabase/tests/tenancy-isolation.sql):
+**79 assertions**, run in CI on every PR via `pnpm db:test`.
+
+The suite was itself verified by sabotage — disabling RLS on `tenants`, and
+separately making `is_tenant_member()` return `true` unconditionally, each make it
+fail with `psql` exit code 3. An isolation test that cannot detect broken isolation
+is worthless, so this check matters as much as the tests.
+
+What it proves, with two sellers (Rhea, Marlon), a packer, and a user with no
+tenant at all:
+
+- Cross-tenant `SELECT` returns zero rows — by id, by slug, and summed across all
+  four tables at once
+- Cross-tenant `UPDATE`/`DELETE` affect zero rows; cross-tenant `INSERT` raises
+- A user with no membership sees zero tenants and only their own profile
+- Teammates can read each other's profiles; non-teammates cannot
+- An invitation token is never readable through RLS, cannot be redeemed by a
+  different email, cannot be redeemed twice, and expires
+- Roles are enforced: a packer cannot rename the tenant, invite, add members, or
+  self-promote; an admin cannot invite at owner level
+- A tenant can never lose its last owner
+- A spoofed `x-selld-tenant` header falls back to the caller's own tenant
+- `anon` has no privilege on any base table, but can read the public storefront
+  projection — which is asserted to expose only branding columns, and to drop
+  suspended stores
+
+**Delivered**
+
+- Four tables — `tenants`, `profiles`, `tenant_members`, `invitations` — with RLS
+  and `FORCE ROW LEVEL SECURITY` on all four
+- RLS helpers: `is_tenant_member()`, `tenant_role_of()`, `has_tenant_role()`,
+  `current_tenant_id()`, plus `tenant_role_rank()` for "at least this role" checks
+- RPCs: `create_tenant()` (tenant + owner membership atomically),
+  `accept_invitation()`, `my_tenants()`
+- Auth trigger creating a profile per user, normalising `639…` to `+639…`
+- Last-owner protection trigger
+- `storefront_tenants` — a minimal public projection for anonymous
+  `{slug}.selld.ph` resolution
+- OTP sign-in (SMS or email, 6-digit code), tenant switcher, account menu,
+  create-store page, invitation acceptance at `/invite/:token`
+- Dashboard and storefront split into separate lazy chunks
+- CI additions: `pnpm db:test`, plus a check that `database.types.ts` matches the
+  migrations
+
+**Verified**
+
+- 143 unit tests; 79 SQL assertions
+- Sign-in verified in Chromium at 390px and 1280px, both locales, zero console
+  errors, no horizontal overflow. Landline input is rejected client-side **before**
+  an SMS credit is spent.
+- Storefront payload cut from 190 KB to **88 KB gzipped** by the code split
+
+**Deferred, deliberately**
+
+- **Phone OTP delivery is not wired to Semaphore.** Supabase has no native
+  Semaphore provider, so live SMS needs a Send-SMS auth hook (an Edge Function).
+  The client path is complete and tested; the hook lands with the `SmsProvider`
+  implementation in phase 11, which is the first phase that needs Semaphore
+  credentials anyway. **Email OTP works today; phone OTP will not deliver until
+  then.**
+- Invitation **emails** are not sent — `inviteMember()` creates the row, and the
+  link must be shared manually for now. Phase 2 owns the team-management UI.
+- No end-to-end auth run against a live Supabase stack (see the phase 0 note on
+  the container's disk budget). The RLS layer is proven against real Postgres; the
+  OTP round trip is covered by unit tests with the client stubbed.
 
 ---
 
