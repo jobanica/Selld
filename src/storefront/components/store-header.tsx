@@ -1,3 +1,4 @@
+import { ShoppingBag } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { useStorageUrl, useStorefront } from '../use-storefront'
@@ -22,7 +23,7 @@ export function StoreHeader({
   showSearch?: boolean
 }) {
   const { t } = useTranslation()
-  const { store } = useStorefront()
+  const { store, cartCount } = useStorefront()
   const toUrl = useStorageUrl()
   const logo = toUrl(store.logoPath)
 
@@ -69,6 +70,24 @@ export function StoreHeader({
             />
           </form>
         )}
+
+      {/* Cart. A plain link, so it works before hydration and is crawl-safe. */}
+        <a
+          href="/cart"
+          className={
+            showSearch
+              ? 'relative grid size-11 shrink-0 place-items-center rounded-full hover:bg-accent'
+              : 'relative ml-auto grid size-11 shrink-0 place-items-center rounded-full hover:bg-accent'
+          }
+          aria-label={t('cart.openWithCount', { count: cartCount })}
+        >
+          <ShoppingBag className="size-5" aria-hidden="true" />
+          {cartCount > 0 && (
+            <span className="absolute -right-0.5 -top-0.5 grid min-w-5 place-items-center rounded-full bg-primary px-1 text-[11px] font-bold leading-5 text-primary-foreground">
+              {cartCount > 99 ? '99+' : cartCount}
+            </span>
+          )}
+        </a>
       </div>
 
       {categories.length > 0 && (

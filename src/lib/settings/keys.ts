@@ -25,6 +25,7 @@ export type SettingKey =
   | 'orders.number_prefix'
   | 'orders.auto_confirm'
   | 'catalog.presets'
+  | 'shipping.flat_centavos'
 
 export interface TenantSettings {
   /** Which wizard step to resume at, 1-5. */
@@ -43,6 +44,15 @@ export interface TenantSettings {
   'orders.auto_confirm': boolean
   /** Chosen category presets from onboarding; phase 3 seeds categories from these. */
   'catalog.presets': string[]
+  /**
+   * Flat shipping charge, applied to every order.
+   *
+   * Phase 7 replaces the *resolver* — zones by region/province/city, weight tiers,
+   * free-over-threshold, live courier quotes — not this key. Checkout could not
+   * wait for that, and a store that ships everything free by default is worse than
+   * one that charges a stated flat rate.
+   */
+  'shipping.flat_centavos': Centavos
 }
 
 export const SETTING_DEFAULTS: TenantSettings = {
@@ -55,6 +65,8 @@ export const SETTING_DEFAULTS: TenantSettings = {
   'orders.number_prefix': '',
   'orders.auto_confirm': false,
   'catalog.presets': [],
+  // ₱80 is the going rate for a Metro Manila small-parcel COD delivery.
+  'shipping.flat_centavos': centavos(8000),
 }
 
 type Parser<K extends SettingKey> = (raw: unknown) => TenantSettings[K] | undefined
@@ -71,6 +83,10 @@ const PARSERS: { [K in SettingKey]: Parser<K> } = {
     raw === null ? null : typeof raw === 'string' && raw !== '' ? raw : undefined,
   'payments.cod_enabled': (raw) => (typeof raw === 'boolean' ? raw : undefined),
   'payments.cod_fee_centavos': (raw) =>
+    typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 0
+      ? (raw as Centavos)
+      : undefined,
+  'shipping.flat_centavos': (raw) =>
     typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 0
       ? (raw as Centavos)
       : undefined,

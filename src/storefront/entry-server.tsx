@@ -7,7 +7,8 @@ import {
   NATURAL_IMAGE_WIDTH,
   PRODUCT_IMAGE_SIZES,
 } from './image-config'
-import { srcSet, type PageData } from './storefront-data'
+import { srcSet } from './storefront-data'
+import type { StorefrontPage } from './storefront-root'
 import { StorefrontRoot } from './storefront-root'
 import { themeStyleSheet } from './theme'
 
@@ -21,10 +22,12 @@ import { themeStyleSheet } from './theme'
  */
 
 export interface RenderInput {
-  data: PageData
+  data: StorefrontPage
   origin: string
   storageOrigin: string
   path: string
+  /** Items in the cart, for the header badge. */
+  cartCount?: number
 }
 
 export interface RenderOutput {
@@ -50,15 +53,26 @@ export interface RenderOutput {
   status: number
 }
 
-export function render({ data, origin, storageOrigin, path }: RenderInput): RenderOutput {
+export function render({
+  data,
+  origin,
+  storageOrigin,
+  path,
+  cartCount = 0,
+}: RenderInput): RenderOutput {
   const html = renderToString(
     <StrictMode>
-      <StorefrontRoot data={data} storageOrigin={storageOrigin} origin={origin} />
+      <StorefrontRoot
+        data={data}
+        storageOrigin={storageOrigin}
+        origin={origin}
+        cartCount={cartCount}
+      />
     </StrictMode>,
   )
 
   const head = buildHead({ data, origin, storageOrigin, path })
-  const store = data.route === 'not-found' ? data.store : data.payload.store
+  const store = storeOf(data)
 
   const parts: string[] = [head.tags]
 
@@ -74,7 +88,12 @@ export function render({ data, origin, storageOrigin, path }: RenderInput): Rend
     // above-the-fold element depends on for its colour; a separate request for it
     // would mean either a flash of Selld green or a blocked first paint.
     themeCss: store === null ? '' : themeStyleSheet(store),
-    state: serializeForScript({ data, storageOrigin, origin }),
+    // `cartCount` has to be here. Leaving it out meant the client hydrated with
+    // the default of 0 while the server had rendered a badge — "Did not expect
+    // server HTML to contain a <span> in <a>" — and React responded by discarding
+    // the entire server-rendered tree and re-rendering from scratch. A silent
+    // mismatch like that undoes the whole reason this surface is server-rendered.
+    state: serializeForScript({ data, storageOrigin, origin, cartCount }),
     preload: buildPreload({ data, storageOrigin }),
     status: statusFor(data),
   }
@@ -92,7 +111,7 @@ function buildPreload({
   data,
   storageOrigin,
 }: {
-  data: PageData
+  data: StorefrontPage
   storageOrigin: string
 }): string {
   const hints: string[] = []
@@ -134,7 +153,7 @@ interface LcpImage {
 }
 
 /** The single image most likely to be the LCP element, or null if there is none. */
-function lcpImage(data: PageData): LcpImage | null {
+function lcpImage(data: StorefrontPage): LcpImage | null {
   if (data.route === 'product') {
     if (data.payload.product === null) return null
     const image =
@@ -162,8 +181,14 @@ function lcpImage(data: PageData): LcpImage | null {
   return null
 }
 
-function statusFor(data: PageData): number {
+function statusFor(data: StorefrontPage): number {
   if (data.route === 'not-found') return 404
   if (data.route === 'product' && data.payload.product === null) return 404
   return 200
+}
+
+/** Branding for whichever page shape this is. Mirrors `storeOf` in the root. */
+function storeOf(data: StorefrontPage) {
+  if (data.route === 'home' || data.route === 'product') return data.payload.store
+  return data.store ?? null
 }

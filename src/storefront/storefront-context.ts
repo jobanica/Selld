@@ -12,6 +12,8 @@ export interface StorefrontContextValue {
   storageOrigin: string
   /** Absolute origin of this store, for canonical and OG URLs. */
   origin: string
+  /** Items in the cart, for the header badge. */
+  cartCount: number
 }
 
 /**

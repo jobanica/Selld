@@ -1,6 +1,9 @@
 import { formatPHP } from '@/lib/money'
 
+import type { CartPageData } from './cart-data'
 import { price, priceRange, storageUrl, type PageData, type Store } from './storefront-data'
+
+type AnyPage = PageData | CartPageData
 
 /**
  * The document head, as a string.
@@ -53,7 +56,7 @@ function truncate(value: string, max: number): string {
 }
 
 export interface HeadInput {
-  data: PageData
+  data: AnyPage
   origin: string
   storageOrigin: string
   /** Path with query, for the canonical URL. */
@@ -67,6 +70,25 @@ export interface HeadResult {
 }
 
 export function buildHead({ data, origin, storageOrigin, path }: HeadInput): HeadResult {
+  // Cart, checkout and the receipt are per-buyer pages with nothing to rank and,
+  // from the checkout step onward, a name, phone number and address on them. They
+  // are noindex, carry no canonical, and get no OG tags — a crawler that indexed a
+  // receipt would publish somebody's address.
+  if (data.route === 'cart' || data.route === 'checkout' || data.route === 'order-confirmed') {
+    const name = data.store?.name ?? 'Selld'
+    const title =
+      data.route === 'cart'
+        ? `Cart · ${name}`
+        : data.route === 'checkout'
+          ? `Checkout · ${name}`
+          : `Order ${data.receipt.orderNumber} · ${name}`
+    return {
+      title,
+      tags: '<meta name="robots" content="noindex,nofollow" />',
+      jsonLd: null,
+    }
+  }
+
   if (data.route === 'not-found') {
     return {
       title: 'Store not found · Selld',
@@ -185,7 +207,7 @@ export function buildHead({ data, origin, storageOrigin, path }: HeadInput): Hea
  * canonicalises to the unfiltered store so a thousand `?q=` permutations do not
  * become a thousand near-duplicate URLs competing with each other.
  */
-function canonicalPath(data: PageData, path: string): string {
+function canonicalPath(data: AnyPage, path: string): string {
   if (data.route === 'product' && data.payload.product !== null) {
     return `/p/${data.payload.product.slug}`
   }
@@ -277,7 +299,7 @@ function productJsonLd({
   canonical,
   image,
 }: {
-  data: PageData
+  data: AnyPage
   store: Store
   canonical: string
   image: string | null

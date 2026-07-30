@@ -237,6 +237,8 @@ export function ProductPage({ payload }: { payload: ProductPayload }) {
             */}
             <div className="hidden sm:block">
               <AddToCart
+                variantId={variant?.id ?? null}
+                productSlug={product.slug}
                 disabled={soldOut || needsChoice || variant?.inStock === false}
                 label={
                   soldOut
@@ -289,6 +291,8 @@ export function ProductPage({ payload }: { payload: ProductPayload }) {
           </div>
           <AddToCart
             className="w-auto shrink-0 px-6"
+            variantId={variant?.id ?? null}
+            productSlug={product.slug}
             disabled={soldOut || needsChoice || variant?.inStock === false}
             label={
               soldOut
@@ -309,30 +313,39 @@ export function ProductPage({ payload }: { payload: ProductPayload }) {
 }
 
 /**
- * Add to cart.
+ * Add to cart — a real form POST.
  *
- * Phase 6 owns the cart. Until then this is a real, correctly-stated control
- * rather than a fake one: it reflects stock and option state, and says plainly
- * that checkout is not open yet instead of pretending to add something.
+ * Not a `fetch` handler. The whole point of phase 5's deferred hydration is that a
+ * buyer on a slow connection can use the page before the JavaScript lands, and
+ * "add to cart" is the first thing they will tap. A form submit works from the
+ * moment the HTML paints; the server adds the line and 303s back to this page.
+ *
+ * `variantId` is a hidden field rather than a query parameter because this must be
+ * a POST — a cart that a prefetcher or an `<img src>` can modify is not a cart.
  */
 function AddToCart({
   label,
   disabled,
+  variantId,
+  productSlug,
   className,
 }: {
   label: string
   disabled: boolean
+  variantId: string | null
+  productSlug: string
   className?: string
 }) {
-  const { t } = useTranslation()
-  const [notice, setNotice] = useState(false)
-
   return (
-    <div className={cn('w-full', className)}>
+    <form method="post" action="/cart/add" className={cn('w-full', className)}>
+      <input type="hidden" name="variantId" value={variantId ?? ''} />
+      <input type="hidden" name="qty" value="1" />
+      {/* Come back to this product, so a buyer can add a second variant without
+          navigating. Validated server-side as a same-origin path. */}
+      <input type="hidden" name="return" value={`/p/${productSlug}`} />
       <button
-        type="button"
-        disabled={disabled}
-        onClick={() => setNotice(true)}
+        type="submit"
+        disabled={disabled || variantId === null}
         className={cn(
           'h-12 w-full rounded-full bg-primary px-5 text-sm font-semibold text-primary-foreground transition-opacity',
           'disabled:cursor-not-allowed disabled:opacity-50',
@@ -341,12 +354,7 @@ function AddToCart({
       >
         {label}
       </button>
-      {notice && (
-        <p role="status" className="mt-1.5 text-center text-xs text-muted-foreground">
-          {t('storefront.checkoutComingSoon')}
-        </p>
-      )}
-    </div>
+    </form>
   )
 }
 

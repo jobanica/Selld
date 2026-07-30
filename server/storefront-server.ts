@@ -6,7 +6,22 @@ import { brotliCompressSync, gzipSync } from 'node:zlib'
 
 import type { render as renderStorefront } from '../src/storefront/entry-server'
 import { resolveSurface } from '../src/lib/tenant/resolve-tenant'
+import type { CheckoutAddress, CheckoutContact } from '../src/storefront/cart-data'
+import { EMPTY_PSGC_OPTIONS, type CartPageData } from '../src/storefront/cart-data'
+import type { StorefrontPage } from '../src/storefront/storefront-root'
 import type { HomePayload, PageData, ProductPayload } from '../src/storefront/storefront-data'
+import {
+  fetchPsgcOptions,
+  fetchQuote,
+  fetchReceipt,
+  handleCartAdd,
+  handleCartQty,
+  handleCheckoutPost,
+  parseCookies,
+  readRememberedCheckout,
+  type StoreRef,
+} from './cart-routes'
+import { CART_COOKIE } from './cookies'
 import { readSupabaseConfig, rpc, type SupabaseConfig } from './supabase-rpc'
 
 /**
@@ -35,6 +50,14 @@ const ROOT_DOMAIN = process.env.APP_ROOT_DOMAIN ?? process.env.VITE_APP_ROOT_DOM
 
 interface Renderer {
   render: typeof renderStorefront
+}
+
+interface RenderContext {
+  supabase: SupabaseConfig
+  loadRenderer: () => Promise<Renderer>
+  assets: () => Assets
+  middlewares: Middlewares
+  transformHtml: TransformHtml
 }
 
 interface Assets {
@@ -241,13 +264,7 @@ function collectCss(manifest: Manifest, entry: string): string[] {
 async function handle(
   request: IncomingMessage,
   response: ServerResponse,
-  context: {
-    supabase: SupabaseConfig
-    loadRenderer: () => Promise<Renderer>
-    assets: () => Assets
-    middlewares: Middlewares
-    transformHtml: TransformHtml
-  },
+  context: RenderContext,
 ): Promise<void> {
   const host = (request.headers.host ?? '').toLowerCase()
   const hostname = host.split(':')[0] ?? ''
@@ -289,6 +306,79 @@ async function handle(
     const sitemap = await buildSitemap(context.supabase, { slug, domain, origin: url.origin })
     if (sitemap === null) return sendNotFoundXml(response)
     return sendText(request, response, sitemap, 'application/xml; charset=utf-8')
+  }
+
+  const store: StoreRef = { slug, domain }
+
+  // ---- Cart and checkout ------------------------------------------------
+  // Mutations are POST-only. A cart that can be changed by a GET is a cart that
+  // a prefetcher, a crawler or an <img> tag can change.
+  if (request.method === 'POST') {
+    if (url.pathname === '/cart/add') return handleCartAdd(request, response, context.supabase, store)
+    if (url.pathname === '/cart/qty') return handleCartQty(request, response, context.supabase, store)
+    if (url.pathname === '/checkout') {
+      const outcome = await handleCheckoutPost(request, response, context.supabase, store)
+      if (outcome.kind === 'redirect') return
+      // Re-render the form: either the buyer needs the next address level, or
+      // something they entered was rejected.
+      return renderCheckout(request, response, context, {
+        url,
+        store,
+        contact: outcome.contact,
+        address: outcome.address,
+        error: outcome.error,
+      })
+    }
+    response.writeHead(405, { Allow: 'GET' }).end()
+    return
+  }
+
+  if (url.pathname === '/cart') {
+    const token = cartTokenFrom(request)
+    const [quote, branding] = await Promise.all([
+      fetchQuote(context.supabase, token),
+      fetchStoreBranding(context.supabase, store),
+    ])
+    return renderPage(request, response, context, url, { route: 'cart', store: branding, quote })
+  }
+
+  if (url.pathname === '/checkout') {
+    const remembered = readRememberedCheckout(parseCookies(request))
+    return renderCheckout(request, response, context, {
+      url,
+      store,
+      contact: {
+        name: remembered.name ?? '',
+        phone: remembered.phone ?? '',
+        email: remembered.email ?? '',
+        notes: '',
+      },
+      address: {
+        regionCode: remembered.regionCode ?? '',
+        provinceCode: remembered.provinceCode ?? null,
+        cityCode: remembered.cityCode ?? '',
+        barangayCode: remembered.barangayCode ?? '',
+        ...(remembered.street === undefined ? {} : { street: remembered.street }),
+        ...(remembered.landmark === undefined ? {} : { landmark: remembered.landmark }),
+        ...(remembered.postalCode === undefined ? {} : { postalCode: remembered.postalCode }),
+      },
+      error: null,
+    })
+  }
+
+  if (url.pathname === '/order/confirmed') {
+    const [receipt, branding] = await Promise.all([
+      fetchReceipt(context.supabase, cartTokenFrom(request)),
+      fetchStoreBranding(context.supabase, store),
+    ])
+    // No receipt means no order for this cookie — a bookmarked confirmation, or a
+    // cleared cookie. The cart is the honest place to land, not an error.
+    if (receipt === null) return redirectTo(response, '/cart')
+    return renderPage(request, response, context, url, {
+      route: 'order-confirmed',
+      store: branding,
+      receipt,
+    })
   }
 
   const data = await loadPageData(context.supabase, { slug, domain, url, hostname })
@@ -363,6 +453,123 @@ async function loadPageData(
   }
 }
 
+
+// ---------------------------------------------------------------------------
+// Cart / checkout rendering
+// ---------------------------------------------------------------------------
+
+/**
+ * Just the store's branding, for pages that are reached by cookie.
+ *
+ * `storefront_home` with a page size of 1 rather than a dedicated RPC: the
+ * function already returns the store, the product it also returns is one row, and
+ * a second function would be a second thing to keep in step with the theme.
+ */
+async function fetchStoreBranding(
+  supabase: SupabaseConfig,
+  store: StoreRef,
+): Promise<HomePayload['store'] | null> {
+  const payload = await rpc<HomePayload | null>(supabase, 'storefront_home', {
+    p_slug: store.slug,
+    p_domain: store.domain,
+    p_limit: 1,
+  })
+  return payload?.store ?? null
+}
+
+function cartTokenFrom(request: IncomingMessage): string | null {
+  const token = parseCookies(request)[CART_COOKIE]
+  return token !== undefined && /^[0-9a-f]{64}$/.test(token) ? token : null
+}
+
+function redirectTo(response: ServerResponse, location: string): void {
+  response.writeHead(303, { Location: location, 'Cache-Control': 'no-store' }).end()
+}
+
+/**
+ * Render any cart-family page.
+ *
+ * These are `no-store`, unlike the catalog pages: a cart is per-buyer, and an edge
+ * cache that treats it like the product grid would serve one buyer's cart to
+ * another.
+ */
+async function renderPage(
+  request: IncomingMessage,
+  response: ServerResponse,
+  context: RenderContext,
+  url: URL,
+  page: CartPageData,
+): Promise<void> {
+  const { render } = await context.loadRenderer()
+  const rendered = render({
+    data: page,
+    origin: url.origin,
+    storageOrigin: context.supabase.url,
+    path: `${url.pathname}${url.search}`,
+    cartCount: page.route === 'cart' || page.route === 'checkout' ? (page.quote?.itemCount ?? 0) : 0,
+  })
+  const document = await context.transformHtml(
+    url.pathname,
+    buildDocument(rendered, context.assets(), page),
+  )
+  sendPrivateHtml(request, response, document, rendered.status)
+}
+
+async function renderCheckout(
+  request: IncomingMessage,
+  response: ServerResponse,
+  context: RenderContext,
+  input: {
+    url: URL
+    store: StoreRef
+    contact: CheckoutContact
+    address: Partial<CheckoutAddress>
+    error: { field: string; message: string } | null
+  },
+): Promise<void> {
+  const token = cartTokenFrom(request)
+  const quote = await fetchQuote(context.supabase, token)
+
+  // An empty cart has nothing to check out. Sending the buyer back is kinder than
+  // rendering a form that cannot be submitted.
+  if (quote === null || quote.itemCount === 0) return redirectTo(response, '/cart')
+
+  const [options, branding] = await Promise.all([
+    fetchPsgcOptions(context.supabase, input.address).catch(() => EMPTY_PSGC_OPTIONS),
+    fetchStoreBranding(context.supabase, input.store),
+  ])
+
+  return renderPage(request, response, context, input.url, {
+    route: 'checkout',
+    store: branding,
+    quote,
+    contact: input.contact,
+    address: input.address,
+    options,
+    error: input.error === null ? null : { field: input.error.field as never, message: input.error.message },
+  })
+}
+
+function sendPrivateHtml(
+  request: IncomingMessage,
+  response: ServerResponse,
+  body: string,
+  status: number,
+): void {
+  const { payload, encoding } = compress(request, body)
+  response.writeHead(status, {
+    'Content-Type': 'text/html; charset=utf-8',
+    ...(encoding === null ? {} : { 'Content-Encoding': encoding }),
+    Vary: 'Accept-Encoding',
+    // Never cached anywhere. This page contains one buyer's cart, and from the
+    // checkout step onward their name, phone and address.
+    'Cache-Control': 'no-store, private',
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+  })
+  response.end(payload)
+}
+
 // ---------------------------------------------------------------------------
 // Document assembly
 // ---------------------------------------------------------------------------
@@ -370,11 +577,15 @@ async function loadPageData(
 function buildDocument(
   rendered: Awaited<ReturnType<Renderer['render']>>,
   assets: Assets,
-  data: PageData,
+  data: StorefrontPage,
 ): string {
-  const lang = (data.route === 'not-found' ? data.store?.locale : data.payload.store.locale) ?? 'en'
-  const themeColor =
-    data.route === 'not-found' ? null : (data.payload.store.brandColor ?? null)
+  // One accessor for both page shapes. This used to read `data.payload.store`
+  // directly, which is right for catalog pages and undefined for cart pages — and
+  // the `as never` casts at the two call sites hid the mismatch from the type
+  // checker until the cart 500'd at runtime. The casts are gone.
+  const store = pageStore(data)
+  const lang = store?.locale ?? 'en'
+  const themeColor = store?.brandColor ?? null
 
   // Order matters and is load-bearing: the theme goes AFTER the app stylesheet.
   // index.css declares `--primary` on `:root`, the theme re-declares it on `:root`,
@@ -449,6 +660,12 @@ function hydrationBootstrap(scripts: string[]): string {
   const list = JSON.stringify(scripts)
 
   return `<script>(function(){var s=${list},d=0;function go(){if(d)return;d=1;for(var i=0;i<s.length;i++){var e=document.createElement('script');e.type='module';e.src=s[i];e.fetchPriority='low';document.head.appendChild(e)}}function idle(){if(window.requestIdleCallback){requestIdleCallback(go,{timeout:2500})}else{setTimeout(go,200)}}if(document.readyState==='complete'){idle()}else{addEventListener('load',idle)}var t=['pointerdown','touchstart','keydown'];for(var j=0;j<t.length;j++){addEventListener(t[j],go,{once:true,passive:true})}})()</script>`
+}
+
+/** Branding for either page shape. Mirrors `storeOf` in the renderer. */
+function pageStore(data: StorefrontPage): HomePayload['store'] | null {
+  if (data.route === 'home' || data.route === 'product') return data.payload.store
+  return data.store ?? null
 }
 
 // ---------------------------------------------------------------------------

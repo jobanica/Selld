@@ -198,6 +198,31 @@ jobs:
             \$\$;
           "
 
+      # Phase 6's hard rule 6: never trust client-side prices. This is asserted in
+      # the RLS suite (a tampered cart_items snapshot must not change what an order
+      # charges), and the check below is the cheap smoke test that the guest path
+      # exists at all and refuses an unknown store.
+      - name: Guest cart path is reachable by anon
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h 127.0.0.1 -p 54322 -U postgres -v ON_ERROR_STOP=1 -c "
+            set role anon;
+            do \$\$
+            begin
+              begin
+                perform public.cart_create('definitely-not-a-store');
+                raise exception 'cart_create should refuse an unknown store';
+              exception when no_data_found then null;
+              end;
+              if public.cart_view(repeat('a', 64)) is not null then
+                raise exception 'a forged cart token must not resolve';
+              end if;
+              raise notice 'guest cart path OK';
+            end
+            \$\$;
+          "
+
       # Guard against the checked-in types drifting from the migrations. If this
       # fails, someone forgot `pnpm db:types` and the client types are lying.
       - name: database.types.ts matches the migrations

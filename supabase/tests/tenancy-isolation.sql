@@ -1444,6 +1444,299 @@ $$;
 set local role authenticated;
 
 -- ---------------------------------------------------------------------------
+-- Phase 6: carts, orders and the token boundary
+-- ---------------------------------------------------------------------------
+-- This phase introduces a *second* authorisation model. Everywhere else the
+-- boundary is `is_tenant_member(tenant_id)`; a buyer has no account, so the
+-- boundary is the cart token. Both have to hold, and the token one is new, so it
+-- gets the most attention here.
+\echo ''
+\echo '=== Phase 6: cart / checkout'
+
+reset role;
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+  update public.products set status = 'active' where slug = 'whitening-soap';
+  update public.tenants  set status = 'active' where id = i.marlon_tenant;
+  -- Checkout needs stock and somewhere to hold it.
+  insert into public.locations (tenant_id, name, type, is_default)
+  values (i.rhea_tenant, 'Test location', 'home', true)
+  on conflict do nothing;
+end;
+$$;
+
+do $$
+declare i record; v_variant uuid; v_location uuid;
+begin
+  select * into i from tests.ids;
+  select id into v_location from public.locations where tenant_id = i.rhea_tenant limit 1;
+  select v.id into v_variant from public.product_variants v
+    join public.products p on p.id = v.product_id
+  where p.slug = 'whitening-soap' limit 1;
+  insert into public.stock_movements (tenant_id, variant_id, location_id, delta, reason)
+  values (i.rhea_tenant, v_variant, v_location, 50, 'receive');
+end;
+$$;
+
+set local role anon;
+select tests.logout();
+do $$
+declare
+  v_token   text;
+  v_other   text;
+  v_variant uuid;
+  v_view    jsonb;
+  v_order   jsonb;
+  v_addr    jsonb;
+begin
+  -- anon must reach none of these tables. The whole model depends on it.
+  perform tests.rejects($q$ select count(*) from public.carts $q$,
+    'anon has no privilege on carts');
+  perform tests.rejects($q$ select count(*) from public.cart_items $q$,
+    'anon has no privilege on cart_items');
+  perform tests.rejects($q$ select count(*) from public.orders $q$,
+    'anon has no privilege on orders');
+  perform tests.rejects($q$ select count(*) from public.order_items $q$,
+    'anon has no privilege on order_items');
+  perform tests.rejects($q$ select count(*) from public.customers $q$,
+    'anon has no privilege on customers');
+  perform tests.rejects($q$ select count(*) from public.order_counters $q$,
+    'anon cannot read the order number counter');
+  perform tests.rejects($q$ select count(*) from public.sms_logs $q$,
+    'anon cannot read sms logs');
+  perform tests.rejects($q$ select count(*) from public.integration_logs $q$,
+    'anon cannot read integration logs');
+
+  -- Nor the internal functions, which do no authorisation of their own.
+  perform tests.rejects($q$ select public.cart_pricing('00000000-0000-0000-0000-000000000000') $q$,
+    'anon cannot call cart_pricing directly');
+  perform tests.rejects(
+    $q$ select public.apply_reservation('00000000-0000-0000-0000-000000000000',
+      '00000000-0000-0000-0000-000000000000', '[]'::jsonb) $q$,
+    'anon cannot call apply_reservation directly');
+  perform tests.rejects($q$ select public.order_receipt('00000000-0000-0000-0000-000000000000') $q$,
+    'anon cannot read an order by id');
+
+  -- A forged token must resolve to nothing rather than to somebody's cart.
+  perform tests.ok(public.cart_view(repeat('a', 64)) is null,
+    'a forged cart token resolves to nothing');
+
+  v_token := public.cart_create('rheas-finds');
+  perform tests.eq(length(v_token), 64, 'a cart token is 32 bytes of hex');
+
+  select v.id into v_variant from public.storefront_variants v
+    join public.storefront_products p on p.id = v.product_id
+  where p.slug = 'whitening-soap' limit 1;
+
+  v_view := public.cart_add_item(v_token, v_variant, 2);
+  perform tests.eq((v_view ->> 'itemCount')::int, 2, 'anon can add to their own cart');
+
+  -- Cross-cart: a second cart must not see the first one's contents.
+  v_other := public.cart_create('rheas-finds');
+  perform tests.eq((public.cart_view(v_other) ->> 'itemCount')::int, 0,
+    'one cart token cannot see another cart''s items');
+
+  -- A variant from another store cannot be added, even with a valid token.
+  perform tests.rejects(
+    format($q$ select public.cart_add_item(%L, (select v.id from public.product_variants v
+      join public.products p on p.id = v.product_id where p.slug = 'kicks' limit 1), 1) $q$, v_token),
+    'a variant from another store cannot be added to this cart');
+
+  -- Hard rule 6 gets its own pinned section below.
+  perform tests.eq(
+    (public.cart_view(v_token) ->> 'subtotal')::bigint,
+    2 * (select price_centavos from public.storefront_variants where id = v_variant)::bigint,
+    'the quote prices from the live variant price');
+end;
+$$;
+
+-- ---- Hard rule 6, properly pinned -------------------------------------
+-- The tamper and the assertion must act on the SAME cart. An earlier version of
+-- this picked the cart with `order by created_at desc offset 1`, tampered with one
+-- row and asserted on another — and it passed even when `cart_pricing` was
+-- rewritten to trust the client's snapshot. A test that survives the sabotage it
+-- exists to catch is worse than no test, so the token is stashed and reused.
+--
+-- `reset role` first: the previous section left the session as `anon`, which cannot
+-- create anything in the tests schema.
+reset role;
+create table tests.cart_under_test (token text primary key);
+grant usage on schema tests to anon, authenticated;
+grant select, insert on tests.cart_under_test to anon, authenticated;
+
+reset role;
+set local role anon;
+select tests.logout();
+do $$
+declare v_token text; v_variant uuid;
+begin
+  v_token := public.cart_create('rheas-finds');
+  select v.id into v_variant from public.storefront_variants v
+    join public.storefront_products p on p.id = v.product_id
+  where p.slug = 'whitening-soap' limit 1;
+  perform public.cart_add_item(v_token, v_variant, 3);
+  reset role;
+  insert into tests.cart_under_test (token) values (v_token);
+end;
+$$;
+
+-- Rewrite the snapshot to 1 centavo — the strongest form of the attack, since a
+-- real client can only influence this column indirectly.
+reset role;
+update public.cart_items ci set unit_price_centavos = 1
+from public.carts c, tests.cart_under_test t
+where c.id = ci.cart_id and c.token = t.token;
+
+set local role anon;
+select tests.logout();
+do $$
+declare
+  v_token    text;
+  v_expected bigint;
+  v_order    jsonb;
+  v_addr     jsonb;
+  v_brgy text; v_city text; v_region text;
+begin
+  select token into v_token from tests.cart_under_test;
+
+  reset role;
+  -- What the buyer must be charged: the live catalog price times the quantity.
+  select sum(v.price_centavos * ci.qty) into v_expected
+  from public.cart_items ci
+    join public.product_variants v on v.id = ci.variant_id
+    join public.carts c on c.id = ci.cart_id
+  where c.token = v_token;
+  select b.code, c.code, c.region_code into v_brgy, v_city, v_region
+  from public.psgc_barangays b join public.psgc_cities c on c.code = b.city_code limit 1;
+  set local role anon;
+
+  -- Sanity: the fixture really is tampered, or the two assertions below prove
+  -- nothing at all.
+  perform tests.ok(v_expected > 3::bigint,
+    'the live price is far above the tampered snapshot, so the check is meaningful');
+
+  perform tests.eq((public.cart_view(v_token) ->> 'subtotal')::bigint, v_expected,
+    'a tampered price snapshot does not change the quote');
+
+  v_addr := jsonb_build_object('regionCode', v_region, 'cityCode', v_city,
+                               'barangayCode', v_brgy, 'street', '1 Test St');
+  v_order := public.checkout_place_order(v_token, 'Test Buyer', '+639171234567', v_addr, 'cod');
+  perform tests.eq((v_order ->> 'subtotal')::bigint, v_expected,
+    'and does not change what the order charges');
+  perform tests.eq((v_order ->> 'grandTotal')::bigint,
+    v_expected + (v_order ->> 'shippingTotal')::bigint + (v_order ->> 'codFee')::bigint,
+    'the grand total is its parts, recomputed server-side');
+
+  -- Idempotency: the same token must not produce a second order.
+  perform tests.eq(
+    public.checkout_place_order(v_token, 'Test Buyer', '+639171234567', v_addr, 'cod') ->> 'orderNumber',
+    v_order ->> 'orderNumber',
+    'replaying checkout returns the same order rather than making another');
+
+  -- Address validation: present is not the same as real. A region code in the city
+  -- field used to be accepted, producing an order no courier could deliver.
+  declare v_fresh text; v_v uuid;
+  begin
+    v_fresh := public.cart_create('rheas-finds');
+    select v.id into v_v from public.storefront_variants v
+      join public.storefront_products p on p.id = v.product_id
+    where p.slug = 'whitening-soap' limit 1;
+    perform public.cart_add_item(v_fresh, v_v, 1);
+    perform tests.rejects(
+      format($q$ select public.checkout_place_order(%L, 'X', '+639171234567',
+        jsonb_build_object('regionCode','130000000','cityCode','020000000',
+                           'barangayCode','150000000'), 'cod') $q$, v_fresh),
+      'a region code in the city field is refused');
+    perform tests.rejects(
+      format($q$ select public.checkout_place_order(%L, 'X', '09171234567',
+        jsonb_build_object('regionCode',%L,'cityCode',%L,'barangayCode',%L), 'cod') $q$,
+        v_fresh, v_region, v_city, v_brgy),
+      'an unnormalised phone number is refused');
+    perform tests.rejects(
+      format($q$ select public.checkout_place_order(%L, 'X', '+639171234567',
+        jsonb_build_object('regionCode',%L,'cityCode',%L,'barangayCode',%L), 'gcash') $q$,
+        v_fresh, v_region, v_city, v_brgy),
+      'an online payment method is refused until phase 8 exists');
+  end;
+end;
+$$;
+
+-- The buyer's receipt is reachable by their token, and by nothing else.
+do $$
+declare v_token text; v_receipt jsonb;
+begin
+  reset role;
+  select c.token into v_token from public.carts c
+    join public.orders o on o.cart_id = c.id limit 1;
+  set local role anon;
+
+  v_receipt := public.order_receipt_for_token(v_token);
+  perform tests.ok(v_receipt is not null, 'a buyer reads their receipt with their own token');
+  perform tests.ok(v_receipt::text not ilike '%cost%',
+    'and the receipt never exposes the seller''s cost');
+  perform tests.ok(public.order_receipt_for_token(repeat('b', 64)) is null,
+    'a forged token reads no receipt');
+end;
+$$;
+
+-- Seller side: ordinary member-scoped RLS, and the token is not readable.
+reset role;
+set local role authenticated;
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+  perform tests.ok((select count(*) from public.orders) >= 1, 'Rhea can read her own orders');
+  perform tests.eq((select count(*)::int from public.orders where tenant_id = i.marlon_tenant), 0,
+    'Rhea cannot read Marlon''s orders');
+  perform tests.ok((select count(*) from public.customers) >= 1, 'Rhea can read her own customers');
+  perform tests.eq((select count(*)::int from public.customers where tenant_id = i.marlon_tenant), 0,
+    'Rhea cannot read Marlon''s customers');
+
+  -- Column-level: a cart token is a bearer credential. A seller can see the cart
+  -- but must not be handed the secret that lets them act as the buyer.
+  perform tests.rejects($q$ select token from public.carts limit 1 $q$,
+    'even a member cannot select carts.token');
+  perform tests.ok((select count(*) from public.carts) >= 1,
+    'but can read the rest of the cart row');
+
+  -- An order is a financial record, and the audit trail behind it is append-only.
+  --
+  -- Asserted with `rejects` rather than `affected`, and the difference is the
+  -- gotcha: a write blocked by RLS affects zero rows silently, but a write blocked
+  -- by a missing *grant* raises 42501. These two have no DELETE grant and no UPDATE
+  -- grant respectively, so they raise — checking for a zero row count here failed
+  -- with "permission denied" instead of passing.
+  perform tests.rejects(
+    format($q$ delete from public.orders where tenant_id = %L $q$, i.rhea_tenant),
+    'orders cannot be deleted, only cancelled');
+  perform tests.rejects(
+    $q$ update public.order_status_history set to_status = 'delivered' $q$,
+    'order status history cannot be rewritten');
+
+  perform tests.ok((select count(*) from public.integration_logs) >= 0,
+    'a member can read integration logs');
+end;
+$$;
+
+select tests.login('22222222-2222-2222-2222-222222222222', 'marlon@example.ph');
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+  perform tests.eq((select count(*)::int from public.orders), 0,
+    'Marlon sees none of Rhea''s orders');
+  perform tests.eq((select count(*)::int from public.cart_items), 0,
+    'and none of her cart items');
+end;
+$$;
+
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+
+-- ---------------------------------------------------------------------------
 -- my_tenants()
 -- ---------------------------------------------------------------------------
 \echo ''
@@ -1480,8 +1773,8 @@ declare v_passed int := coalesce(nullif(current_setting('tests.passed', true), '
 begin
   raise notice '';
   raise notice '=== % assertions passed', v_passed;
-  if v_passed < 185 then
-    raise exception 'Expected at least 185 assertions, only % ran — did a section get skipped?', v_passed
+  if v_passed < 210 then
+    raise exception 'Expected at least 210 assertions, only % ran — did a section get skipped?', v_passed
       using errcode = 'triggered_action_exception';
   end if;
 end;

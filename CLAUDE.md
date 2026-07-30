@@ -5,7 +5,7 @@ Build one phase per session, in order. The full roadmap is in
 [`docs/build-spec.md`](docs/build-spec.md); who we're building for is in
 [`docs/avatar.md`](docs/avatar.md).
 
-**Current state: phase 5 complete.** Next up is phase 6 (cart & guest checkout).
+**Current state: phase 6 complete.** Next up is phase 7 (shipping configuration).
 
 ---
 
@@ -154,6 +154,40 @@ Things that follow from that, and will bite if forgotten:
   and `sizes` disagree they can resolve to different candidates and the browser
   downloads both.
 
+## Two authorisation models, not one
+
+Phases 1–5 have exactly one security boundary: `is_tenant_member(tenant_id)`. Phase
+6 adds a second, because **a buyer has no account** — nothing to check membership
+against. For carts and guest checkout the boundary is the **cart token**: 32 random
+bytes in an httpOnly, SameSite=Lax cookie.
+
+What follows from that:
+
+- **`anon` has no table grants on `carts`, `cart_items`, `orders`, `customers`,
+  `order_counters`, `sms_logs` or `integration_logs`.** Everything goes through
+  `SECURITY DEFINER` functions that validate the token first. A buyer cannot
+  `SELECT` their own cart; they call `cart_view(token)`.
+- **`carts.token` is not selectable, even by a member.** RLS is row-level, so the
+  column list on the grant is the only way to say it — a seller with the token
+  could act as the buyer.
+- **`apply_reservation()` performs no authorisation.** It holds the sorted advisory
+  locks phase 4 introduced, and both `reserve_stock()` (membership) and
+  `checkout_place_order()` (cart token) call it. Splitting it that way is what
+  keeps guest checkout from reimplementing the deadlock-avoidance logic.
+- **`order_receipt(uuid)` is not granted to anon.** Taking an order id alone would
+  make the confirmation URL a capability that leaks a name, phone and address to
+  anyone it is forwarded to; buyers use `order_receipt_for_token()`.
+- **Autofill comes from the buyer's own cookie, never from a phone lookup.** A
+  server-side "look up this phone and return the address" endpoint is an address
+  disclosure oracle on a public form.
+
+**`cart_pricing()` is the only place money is computed.** The quote the buyer sees
+and the order that gets written both go through it, so they cannot disagree.
+`cart_items.unit_price_centavos` is a display snapshot and is never charged —
+`supabase/tests/tenancy-isolation.sql` rewrites it to 1 centavo and asserts the
+order still charges the live price. That assertion was verified to fail when
+`cart_pricing` is changed to trust the snapshot.
+
 ## Architecture
 
 ```
@@ -270,6 +304,27 @@ one new file plus one registry line, and zero lines of order logic.
   Tailwind's sheet lands there rather than on either entry. `manifest[entry].css`
   is empty, and reading only that shipped a completely unstyled storefront that
   still returned 200 with every word of its content present.
+- **Cookie `Secure` comes from the request, not from `NODE_ENV`.** Keying it on the
+  environment emitted Secure cookies over plain http for `pnpm start`, and every
+  client correctly refused to store them — the symptom is not an error but a cart
+  that silently stays empty. See `isSecureRequest()`.
+- **Everything the SSR renderer needs must be in the inlined hydration state.**
+  `cartCount` was passed to the server render but left out of the payload, so the
+  client hydrated with 0, the badge `<span>` did not match, and React discarded the
+  entire server-rendered tree and re-rendered — silently undoing the phase 5 perf
+  work. Hydration warnings on this surface are load-bearing, not cosmetic.
+- **A write blocked by a missing GRANT raises; a write blocked by RLS does not.**
+  The zero-rows rule above only applies to policy denial. `orders` has no DELETE
+  grant, so `delete from orders` raises 42501 — assert with `tests.rejects`, not
+  `tests.affected`.
+- **The peso sign doubles every SMS.** `₱` is absent from GSM-7, so one character
+  forces the whole message to UCS-2 and halves the per-segment budget from 160 to
+  70. Write `PHP 229.00` in anything that goes out over SMS;
+  `src/core/sms/log-provider.test.ts` guards it.
+- **A JSONB address snapshot has no foreign keys.** "Non-empty" accepted a region
+  code posted into the city field and produced an order no courier could deliver.
+  `checkout_place_order` verifies the codes exist in PSGC *and* belong to each
+  other.
 - **`t()` keys must stay literal types.** A `Record<number, \`onboarding.${string}\`>`
   lookup compiles but loses key checking; use `as const` arrays/objects so the
   literal survives.

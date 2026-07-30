@@ -1,8 +1,7 @@
 import { StrictMode } from 'react'
 import { hydrateRoot } from 'react-dom/client'
 
-import type { PageData } from './storefront-data'
-import { StorefrontRoot } from './storefront-root'
+import { StorefrontRoot, type StorefrontPage } from './storefront-root'
 
 import '../index.css'
 
@@ -17,9 +16,10 @@ import '../index.css'
  */
 
 interface BootstrapState {
-  data: PageData
+  data: StorefrontPage
   storageOrigin: string
   origin: string
+  cartCount?: number
 }
 
 function readState(): BootstrapState | null {
@@ -46,6 +46,7 @@ if (container !== null && state !== null) {
         data={state.data}
         storageOrigin={state.storageOrigin}
         origin={state.origin}
+        cartCount={state.cartCount ?? 0}
       />
     </StrictMode>,
   )

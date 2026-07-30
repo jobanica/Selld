@@ -11,8 +11,8 @@ phase's scope and done-when criteria.
 | 3 | Catalog | ✅ Complete |
 | 4 | Inventory | ✅ Complete |
 | 5 | Storefront | ✅ Complete |
-| 6 | Cart & guest checkout | ⬜ Next |
-| 7 | Shipping configuration | ⬜ |
+| 6 | Cart & guest checkout | ✅ Complete |
+| 7 | Shipping configuration | ⬜ Next |
 | 8 | Payments | ⬜ |
 | 9 | Order management dashboard | ⬜ |
 | 10 | Courier integration | ⬜ |
@@ -563,3 +563,104 @@ Two more found while writing the phase, in older code:
 **Gate:** `pnpm verify` (309 tests), `pnpm db:test` (186 assertions),
 `pnpm db:test:concurrency` (23 assertions), `pnpm lighthouse`. All 9 migrations
 apply from scratch on PG 15.8 and 17.6.
+
+---
+
+## Phase 6 — Cart & guest checkout
+
+**Done when:** a full checkout takes under 60 seconds on mobile with 5 taps of
+typing or less.
+
+**Measured** in Chromium at 390×844 @2×, throttled to 150 ms RTT / 1.6 Mbps with a
+4× CPU slowdown, against the production build and a real database — from tapping
+"add to cart" on a product page to the confirmation screen rendering:
+
+| | Result | Budget |
+|---|---:|---:|
+| Elapsed | **34.8 s** | 60 s |
+| Typed fields | **3** (name, phone, street) | ≤ 5 |
+| Taps | 10 | — |
+| Horizontal overflow | 0 px | 0 |
+| Console errors | none | none |
+
+Three typed fields is the genuine floor for a deliverable PH address: everything
+else is a tap, and a returning buyer on the same device gets all of it prefilled.
+
+### The security model changes shape here
+
+Every phase before this had one boundary — `is_tenant_member(tenant_id)`. A buyer
+has no account, so carts and checkout are authorised by a **cart token** (32 random
+bytes, httpOnly, SameSite=Lax). `anon` gets **no table grants at all** on any phase
+6 table; everything goes through `SECURITY DEFINER` functions that check the token.
+`carts.token` is not selectable even by a member — a column-level grant, because RLS
+is row-level and a seller holding the token could act as the buyer.
+
+`apply_reservation()` was extracted from phase 4's `reserve_stock()` so guest
+checkout could hold the same sorted advisory locks without reimplementing them.
+`reserve_stock` checks membership, `checkout_place_order` checks the cart token, and
+both delegate — which also means the concurrency suite still exercises the code path
+the storefront uses.
+
+### Hard rule 6, asserted rather than asserted-to
+
+`cart_pricing()` is the single place money is computed, shared by the quote the
+buyer sees and the order that gets written. The isolation suite rewrites
+`cart_items.unit_price_centavos` to **1 centavo** — the strongest form of the attack
+— and asserts the order still charges ₱447.00.
+
+That assertion was **wrong at first and passed anyway**: the tamper and the check
+ran on different carts, so it stayed green even with `cart_pricing` rewritten to
+trust the client's snapshot. Sabotage caught it. It now stashes the token in a
+fixture table, tampers with that exact cart, and fails with "expected 44700, got 3"
+when the rule is broken.
+
+### What was built
+
+- `customers`, `carts`, `cart_items`, `orders`, `order_items`,
+  `order_status_history`, `order_counters`, plus `integration_logs` and `sms_logs`
+  (hard rule 7's tables — this phase makes the first outbound call).
+- Order numbers from a per-tenant counter updated with `UPDATE … RETURNING`, so two
+  concurrent checkouts cannot take the same number.
+- `orders_total_adds_up` as a CHECK: the grand total must equal its parts, enforced
+  at the schema level rather than trusted from whatever wrote the row.
+- Cart via form POST + 303, so add-to-cart, quantity and remove all work before
+  hydration — and the quantity stepper is two 44 px submit buttons rather than a
+  number input, which on Android opens a keyboard the buyer then has to dismiss.
+- One-page checkout in the brief's order (contact → address → shipping → payment →
+  review). Five separate screens is five round trips on 3G against a stopwatch
+  done-when; the review is permanently visible as the totals block.
+- PSGC cascade with **no province step for NCR**, one server round trip per level.
+  Without JavaScript the buyer taps a labelled button; once hydrated the select
+  calls `requestSubmit` with that same button — the trigger is enhanced, not the
+  fetch, so there is one code path.
+- Confirmation SMS through `src/core/sms` with an idempotency key, retry, and a row
+  in both log tables. It can never fail an order: the order is committed and the
+  buyer is already looking at the receipt, so every failure is caught and logged.
+
+### Notable findings
+
+| Symptom | Cause |
+|---|---|
+| Cart silently stayed empty under `pnpm start` | `Secure` cookie keyed on `NODE_ENV` while serving plain http. Clients correctly refuse to store it, and nothing errors. Now derived from `x-forwarded-proto` / socket encryption. |
+| React discarded the whole SSR tree on cart pages | `cartCount` was rendered server-side but omitted from the inlined hydration payload, so the badge `<span>` mismatched. A hydration warning here silently undoes phase 5's perf work. |
+| An order accepted with a region code as its city | A JSONB address snapshot has no foreign keys, and "non-empty" is not "real". Now verified against PSGC *and* for mutual consistency. |
+| Confirmation SMS cost two segments for 122 characters | `₱` is not in GSM-7, so one character forced UCS-2 and halved the budget from 160 to 70 — doubling the seller's bill on every order. Now `PHP 229.00`. |
+| Place-order button greyed out with everything filled in | It was disabled from the *server's* last-known address, which a buyer who just picked a barangay has not updated. Removed — server validation is the authority, and the barangay arrives with the submit, so the order now completes in that one tap. |
+
+### Deliberately deferred
+
+- **Shipping is one flat rate** from a new `shipping.flat_centavos` setting
+  (default ₱80). Phase 7 owns zones, weight tiers, free-over-threshold and live
+  courier quotes — it replaces the resolver, not the checkout flow.
+- **COD only.** `checkout_place_order` refuses every other method rather than
+  creating an order that cannot be paid; Xendit is phase 8.
+- **Discounts** are wired through the schema and the totals as a zero — phase 14.
+- **Abandoned-cart recovery** has its columns (`carts.expires_at`, status) but no
+  job; phase 11.
+- **Semaphore** is not integrated. The SMS path runs on the `log` provider so it is
+  a real exercised code path from now on rather than something first wired up in
+  phase 11; registering Semaphore is a one-line change at startup.
+
+**Gate:** `pnpm verify` (336 tests), `pnpm db:test` (225 assertions),
+`pnpm db:test:concurrency` (23 assertions). All 11 migrations apply from scratch on
+PG 17.6.

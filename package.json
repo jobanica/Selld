@@ -15,7 +15,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "dev:store": "tsx --env-file-if-exists=.env.local server/storefront-server.ts",
+    "dev:store": "tsx --tsconfig tsconfig.server.json --env-file-if-exists=.env.local server/storefront-server.ts",
     "build": "tsc -b && pnpm build:client && pnpm build:server",
     "preview": "pnpm build && pnpm start",
     "typecheck": "tsc -b --noEmit",
@@ -36,7 +36,7 @@
     "psgc:seed": "tsx scripts/psgc-seed.ts",
     "build:client": "vite build",
     "build:server": "vite build --ssr src/storefront/entry-server.tsx",
-    "start": "NODE_ENV=production tsx --env-file-if-exists=.env.local server/storefront-server.ts",
+    "start": "NODE_ENV=production tsx --tsconfig tsconfig.server.json --env-file-if-exists=.env.local server/storefront-server.ts",
     "seed:demo": "tsx --env-file-if-exists=.env.local scripts/seed-demo.ts",
     "lighthouse": "tsx --env-file-if-exists=.env.local scripts/lighthouse-check.ts"
   },
