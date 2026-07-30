@@ -10,8 +10,8 @@ phase's scope and done-when criteria.
 | 2 | Store onboarding wizard | ✅ Complete |
 | 3 | Catalog | ✅ Complete |
 | 4 | Inventory | ✅ Complete |
-| 5 | Storefront | ⬜ Next |
-| 6 | Cart & guest checkout | ⬜ |
+| 5 | Storefront | ✅ Complete |
+| 6 | Cart & guest checkout | ⬜ Next |
 | 7 | Shipping configuration | ⬜ |
 | 8 | Payments | ⬜ |
 | 9 | Order management dashboard | ⬜ |
@@ -448,3 +448,118 @@ reintroduced. This is a React-18-specific hazard; see `CLAUDE.md`.
   Postgres image directly instead, to stay inside the container's disk budget)
 - `src/features/*` is an empty convention — first slice lands with auth
 - `database.types.ts` currently describes only the PSGC tables
+
+---
+
+## Phase 5 — Storefront
+
+**Done when:** Lighthouse mobile performance ≥ 90 and the store looks legitimately
+branded, not templated.
+
+**Measured** (`pnpm lighthouse`, Lighthouse 13.4 mobile preset — Slow 4G, 1.6 Mbps,
+150 ms RTT, 4× CPU, 390×844 @2×, against the production build and real Supabase
+Storage):
+
+| Page | Perf | A11y | SEO | Best practices | LCP | FCP | TBT | CLS |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Home | **100** | 98 | 100 | 100 | 1.56 s | 0.65 s | 16 ms | 0.000 |
+| Product | **99** | 96 | 100 | 100 | 2.20 s | 0.64 s | 19 ms | 0.000 |
+
+The done-when is met on both pages with margin. The **LCP < 2.0 s architecture
+budget is met on the home page and missed by ~0.2 s on the product page** — see
+"Not met" below. `pnpm lighthouse` gates on the stated done-when and reports the
+LCP budget as a warning; the threshold was deliberately not raised to 2500 ms to
+make it pass, because a threshold moved to match the measurement stops being one.
+
+### What was built
+
+- **Server rendering.** `server/storefront-server.ts` resolves the store from the
+  Host header, fetches one payload, renders React to string, and inlines critical
+  CSS + the theme + the hydration payload. Brotli/gzip on the way out. The
+  dashboard stays client-rendered — it is behind auth and invisible to crawlers.
+- **One round trip per page.** `storefront_home()` and `storefront_product_page()`
+  each return the whole page as a single jsonb document. Five sequential queries
+  would have been 750 ms of pure latency at 150 ms RTT before a byte of HTML.
+- **No client router, progressive enhancement.** Real links, real GET form.
+  Verified with JavaScript fully disabled: search returns results, category
+  filtering works, product links work.
+- **Deferred hydration** to idle-after-load or first interaction, at
+  `fetchpriority="low"`. Both paths verified in a real browser.
+- **Theming** from `storefront_themes` / `brand_color`, with a contrast-derived
+  foreground so a pale brand colour does not produce an unreadable "Add to cart".
+  Seller `custom_css` is sanitised against `</style>` break-out.
+- **Responsive images** with recorded renditions (`product_images.renditions`),
+  matching `sizes` on the `<img>` and `imagesrcset`/`imagesizes` on the preload.
+- **SEO**: per-page title/description, canonical (search canonicalises to the
+  store root and is `noindex`), OG + Twitter tags, Product/Store JSON-LD with
+  `Offer` vs `AggregateOffer` chosen correctly, `robots.txt`, `sitemap.xml`.
+- **Demo fixture.** `pnpm seed:demo` builds "Rhea's Finds" and generates product
+  images with a dependency-free PNG writer, uploaded to real Supabase Storage.
+
+### Notable findings
+
+Five bugs that only a real browser or a real measurement could surface:
+
+| Symptom | Cause |
+|---|---|
+| Every store rendered in Selld green, correct colour present in the HTML | Theme `<style>` emitted *before* the app CSS; equal specificity on `:root` means source order wins. Fixed with `html:root` so it wins on specificity, since in dev Vite appends the app CSS at runtime and ours can never be last. |
+| Production storefront completely unstyled — 200, all content present | Read `manifest[entry].css`, which is empty: Rollup attributes Tailwind's sheet to the vendor chunk shared with the dashboard. Now walks the import graph, and fails loudly if no CSS is reachable. |
+| Dev: no styles, dead variant picker, "can't detect preamble" | Hand-built HTML skipped `vite.transformIndexHtml()`, so React Refresh's preamble never ran. |
+| `fetchPriority` warning for every image during hydration | React 19 prop on a React 18 project. The server emits it verbatim and it works (HTML attributes are case-insensitive) while the client warns. Now passed lowercase. |
+| Product LCP 3.5 s with the network almost idle | The 193 KB React vendor chunk downloaded concurrently with the LCP image. Hydration now waits for idle and requests at low priority. |
+
+Two more found while writing the phase, in older code:
+
+- **`_plural` i18n keys were dead** since i18next v21 — `catalog.variantCount` and
+  `inventory.lowStockCount` had been rendering "3 variant" and "4 item is low on
+  stock" since phases 3 and 4. Nothing warns; the lookup misses and falls back to
+  the singular. Fixed to `_one`/`_other` and guarded by
+  `src/lib/i18n/plurals.test.ts`. In `tl` both forms carry the same text, because
+  Tagalog nouns are not inflected for number.
+- **`pnpm seed:demo` broke `pnpm db:test`** — both create a `rheas-finds` tenant,
+  and the isolation suite asserts absolute counts. The suite now clears the
+  database inside the transaction it already rolls back.
+
+### Sabotage findings
+
+- Removing **only** the `tenant_id` filter from `storefront_product_page()`'s
+  product lookup — leaving everything else identical — makes assertion
+  "a product cannot be fetched through another store's slug" fail. Confirmed.
+- The first version of that assertion **passed for the wrong reason**: an earlier
+  section leaves Marlon's tenant suspended, so the call returned null because the
+  *store* was unresolvable, not because the product was refused. The block now
+  reactivates it first.
+- `sanitizeCustomCss()`'s single-pass replace could be **bypassed by making the
+  removal rebuild the terminator** (`</sty</stylele` → delete the one `</style` →
+  `</style`). Now loops until stable; the bypass string is a test case.
+
+### Not met
+
+- **LCP 2.20 s on the product page**, against the 2.0 s budget. The LCP element is
+  the full-size product photo, and the demo fixture writes **PNG** — a real upload
+  pipeline emitting WebP at the same dimensions is roughly half the bytes, which
+  closes the gap. That belongs in the phase 3 upload path (which does not downscale
+  or transcode at all yet), not in a tuning knob here. Recorded rather than worked
+  around: `content-visibility: auto` on the below-fold related row was tried and
+  reverted, because it made the number non-deterministic (2.1 s / 3.5 s across runs)
+  instead of better.
+- **Generated OG image cards are not built.** The brief asks for "OG image
+  generation per product". What ships is the fallback chain that actually drives
+  Messenger and Facebook previews — real product photo, then the store logo — plus
+  correct OG/Twitter tags, price and availability properties. A *generated* branded
+  card would only apply to products with no photo, and rendering text into a raster
+  needs a font rasteriser (`satori` + `@resvg/resvg-js`, one of them a native
+  binary). Deferred deliberately rather than shipped as an SVG, because Facebook
+  does not accept SVG `og:image` — and Facebook is exactly where this matters.
+
+### Deferred
+
+- `og:image:width`/`height` are omitted because `product_images` stores no
+  dimensions, and a wrong hint makes Facebook crop to it rather than measure.
+- The dashboard is still served by the Vite SPA in dev; the SSR server hands
+  dashboard hostnames the SPA shell in production.
+- Deployment: the storefront now needs a Node process, not just static hosting.
+
+**Gate:** `pnpm verify` (309 tests), `pnpm db:test` (186 assertions),
+`pnpm db:test:concurrency` (23 assertions), `pnpm lighthouse`. All 9 migrations
+apply from scratch on PG 15.8 and 17.6.

@@ -41,6 +41,33 @@ jobs:
       - name: Build
         run: pnpm build
 
+      # The storefront's HTML shell is assembled by the server from the Vite
+      # manifest, and that coupling breaks silently: a CSS file attributed to a
+      # shared chunk rather than the entry produced a completely unstyled
+      # storefront that still returned 200 with all its content. Assert the
+      # manifest is still shaped the way the server reads it.
+      - name: Storefront build output is servable
+        run: |
+          node --input-type=module -e "
+            import { readFileSync } from 'node:fs'
+            const m = JSON.parse(readFileSync('dist/client/.vite/manifest.json', 'utf8'))
+            const key = 'src/storefront/entry-client.tsx'
+            const entry = m[key]
+            if (!entry) throw new Error('storefront entry missing from manifest')
+            const seen = new Set(), css = []
+            const walk = (k) => {
+              if (seen.has(k)) return
+              seen.add(k)
+              const c = m[k]
+              if (!c) return
+              for (const f of c.css ?? []) css.push(f)
+              for (const i of c.imports ?? []) walk(i)
+            }
+            walk(key)
+            if (css.length === 0) throw new Error('no stylesheet reachable from the storefront entry')
+            console.log('storefront entry', entry.file, 'with css', css.join(', '))
+          "
+
   database:
     name: Migrations + RLS isolation tests
     runs-on: ubuntu-latest
@@ -149,6 +176,27 @@ jobs:
         env:
           SUPABASE_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
         run: pnpm db:test:concurrency
+
+      # Phase 5's storefront read model. Runs against the same database the RLS
+      # suite just used, so it exercises the anon path with real reference data.
+      - name: Storefront RPCs are reachable by anon
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h 127.0.0.1 -p 54322 -U postgres -v ON_ERROR_STOP=1 -c "
+            set role anon;
+            do \$\$
+            begin
+              if public.storefront_tenant_id('definitely-not-a-store') is not null then
+                raise exception 'an unknown slug should not resolve';
+              end if;
+              if public.storefront_home('definitely-not-a-store') is not null then
+                raise exception 'an unknown store should return null, not a payload';
+              end if;
+              raise notice 'storefront RPCs callable as anon';
+            end
+            \$\$;
+          "
 
       # Guard against the checked-in types drifting from the migrations. If this
       # fails, someone forgot `pnpm db:types` and the client types are lying.

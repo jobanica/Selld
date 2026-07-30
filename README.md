@@ -5,7 +5,7 @@
 Multi-tenant ecommerce + order operations platform for Philippine social sellers.
 Working name: **Selld** (`selld.ph` / `selld.store`).
 
-> **Status: phase 4 (Inventory) complete.** Next: phase 5, storefront.
+> **Status: phase 5 (Storefront) complete.** Next: phase 6, cart & guest checkout.
 > See [`docs/phase-status.md`](docs/phase-status.md).
 
 ---
@@ -22,14 +22,24 @@ pnpm db:start          # Supabase local stack; prints your anon key
 # paste VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY into .env.local
 pnpm db:reset          # apply migrations + seed PSGC reference data
 
-pnpm dev               # http://localhost:5173
+pnpm dev               # dashboard  -> http://localhost:5173
+
+pnpm seed:demo         # a demo store with product images
+pnpm dev:store         # storefront -> http://rheas-finds.localhost:5174
 ```
 
 The dashboard renders without Supabase credentials, so `pnpm dev` works before you
 set anything up — only features that query the database need `.env.local`.
 
-**Storefronts resolve by hostname.** `http://rhea.localhost:5173` serves a
-storefront; `http://localhost:5173` serves the dashboard.
+**The two surfaces are served differently.** The dashboard is a client-rendered
+SPA behind auth. The storefront is **server-rendered** by a small Node server,
+because it carries an LCP < 2.0 s on 3G budget that a client-rendered page cannot
+meet: HTML, then JS, then boot, then a data fetch is four sequential round trips
+before anything paints.
+
+**Storefronts resolve by hostname.** `*.localhost` subdomains resolve to
+127.0.0.1 in every modern browser, so `http://rheas-finds.localhost:5174` exercises
+the real subdomain path in dev.
 
 ### Before every commit
 
@@ -40,11 +50,20 @@ pnpm db:test           # RLS isolation suite — needs a running database
 
 `verify` deliberately excludes `db:test`, which requires Postgres. CI runs both.
 
+Note: `pnpm db:test` assumes it owns the database — it asserts absolute row counts.
+It clears and repopulates inside a transaction it rolls back, so running it after
+`pnpm seed:demo` is safe and leaves your demo store intact.
+
 ## Commands
 
 | Command | What it does |
 |---|---|
-| `pnpm dev` | Dev server |
+| `pnpm dev` | Dashboard dev server (Vite) on :5173 |
+| `pnpm dev:store` | Storefront SSR server on :5174 |
+| `pnpm build` | Client bundle + SSR renderer (`dist/client`, `dist/server`) |
+| `pnpm start` | Production storefront server — needs `pnpm build` first |
+| `pnpm seed:demo` | Demo store + generated product images, for storefront work |
+| `pnpm lighthouse` | Lighthouse mobile against a running `pnpm start` |
 | `pnpm verify` | Typecheck, lint, test, build — the full gate |
 | `pnpm test:watch` | Tests in watch mode |
 | `pnpm db:start` / `db:stop` | Supabase local stack |

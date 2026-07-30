@@ -29,3 +29,4 @@ supabase/.branches
 *.tsbuildinfo
 vite.config.ts.timestamp-*
 vitest.config.ts.timestamp-*
+.lighthouse

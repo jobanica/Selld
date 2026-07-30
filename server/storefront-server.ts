@@ -1,0 +1,642 @@
+import { createReadStream, existsSync, readFileSync } from 'node:fs'
+import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
+import { extname, join, normalize, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { brotliCompressSync, gzipSync } from 'node:zlib'
+
+import type { render as renderStorefront } from '../src/storefront/entry-server'
+import { resolveSurface } from '../src/lib/tenant/resolve-tenant'
+import type { HomePayload, PageData, ProductPayload } from '../src/storefront/storefront-data'
+import { readSupabaseConfig, rpc, type SupabaseConfig } from './supabase-rpc'
+
+/**
+ * The storefront server.
+ *
+ * Why a server at all, when phases 0–4 shipped a static SPA: the storefront
+ * carries an LCP < 2.0s on 3G budget, and a client-rendered page cannot meet it.
+ * A CSR load is four sequential steps — HTML, JS, boot, then the data fetch —
+ * before anything paints, and on a 150ms-RTT link the round trips alone exceed
+ * the budget. Server rendering collapses that to one round trip for a document
+ * that is already complete.
+ *
+ * The dashboard stays client-rendered. It is behind auth, invisible to crawlers,
+ * and its users are repeat visitors with a warm cache — SSR would add deployment
+ * complexity to solve a problem it does not have.
+ *
+ * Prerendering at build time was the other option the brief allowed, and it does
+ * not work here: stores are created by sellers at runtime, so the set of pages is
+ * not known when the build runs.
+ */
+
+const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)))
+const IS_PRODUCTION = process.env.NODE_ENV === 'production'
+const PORT = Number.parseInt(process.env.PORT ?? '5174', 10)
+const ROOT_DOMAIN = process.env.APP_ROOT_DOMAIN ?? process.env.VITE_APP_ROOT_DOMAIN ?? 'selld.ph'
+
+interface Renderer {
+  render: typeof renderStorefront
+}
+
+interface Assets {
+  scripts: string[]
+  styles: string[]
+  /** Stylesheet contents, inlined in production. */
+  inlineCss: string
+}
+
+/**
+ * Dev-only HTML post-processing.
+ *
+ * Vite has to inject its client and — for @vitejs/plugin-react — the React Refresh
+ * preamble. Hand-built HTML skips that, and the failure is quietly total: the
+ * preamble is missing, so the client module throws "can't detect preamble", so
+ * hydration never runs, so the CSS (which dev serves *through* the module graph)
+ * never lands either. The page renders as unstyled HTML with a dead variant
+ * picker, and nothing in the server log says so.
+ *
+ * In production this is the identity function: the build already emitted real
+ * script and stylesheet URLs.
+ */
+type TransformHtml = (url: string, html: string) => Promise<string>
+
+async function main() {
+  const supabase = readSupabaseConfig()
+  if (supabase === null) {
+    console.error(
+      'Missing SUPABASE_URL / SUPABASE_ANON_KEY (VITE_-prefixed names also accepted).\n' +
+        'Copy .env.example to .env.local and fill it in, or run `pnpm db:start`.',
+    )
+    process.exit(1)
+  }
+
+  const { loadRenderer, assets, middlewares, transformHtml } = IS_PRODUCTION
+    ? await productionSetup()
+    : await developmentSetup()
+
+  const server = createServer((request, response) => {
+    void handle(request, response, {
+      supabase,
+      loadRenderer,
+      assets,
+      middlewares,
+      transformHtml,
+    }).catch(
+      (error: unknown) => {
+        console.error('[storefront] unhandled', error)
+        if (!response.headersSent) {
+          response.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' })
+        }
+        response.end('Internal Server Error')
+      },
+    )
+  })
+
+  server.listen(PORT, () => {
+    console.log(
+      `[storefront] ${IS_PRODUCTION ? 'production' : 'dev'} on http://localhost:${PORT}\n` +
+        `[storefront] root domain: ${ROOT_DOMAIN}  ·  supabase: ${supabase.url}\n` +
+        `[storefront] try: http://rheas-finds.localhost:${PORT}/`,
+    )
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Dev vs production wiring
+// ---------------------------------------------------------------------------
+
+type Middlewares = ((
+  request: IncomingMessage,
+  response: ServerResponse,
+  next: (error?: unknown) => void,
+) => void) | null
+
+async function developmentSetup(): Promise<{
+  loadRenderer: () => Promise<Renderer>
+  assets: () => Assets
+  middlewares: Middlewares
+  transformHtml: TransformHtml
+}> {
+  const { createServer: createViteServer } = await import('vite')
+  const vite = await createViteServer({
+    root: ROOT,
+    appType: 'custom',
+    server: { middlewareMode: true },
+  })
+
+  return {
+    // Loaded per request so an edit to a component is picked up without a
+    // restart, which is the entire point of running Vite in middleware mode.
+    loadRenderer: async () =>
+      (await vite.ssrLoadModule('/src/storefront/entry-server.tsx')) as unknown as Renderer,
+    assets: () => ({
+      // Only the app entry. `/@vite/client` is injected by transformIndexHtml
+      // below — listing it here as well loads it twice.
+      scripts: ['/src/storefront/entry-client.tsx'],
+      styles: [],
+      inlineCss: '',
+    }),
+    middlewares: vite.middlewares,
+    transformHtml: (url, html) => vite.transformIndexHtml(url, html),
+  }
+}
+
+async function productionSetup(): Promise<{
+  loadRenderer: () => Promise<Renderer>
+  assets: () => Assets
+  middlewares: Middlewares
+  transformHtml: TransformHtml
+}> {
+  const serverEntry = join(ROOT, 'dist/server/entry-server.js')
+  const manifestPath = join(ROOT, 'dist/client/.vite/manifest.json')
+
+  if (!existsSync(serverEntry) || !existsSync(manifestPath)) {
+    console.error('Build output missing. Run `pnpm build` first.')
+    process.exit(1)
+  }
+
+  const renderer = (await import(serverEntry)) as unknown as Renderer
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as Manifest
+
+  const entryKey = 'src/storefront/entry-client.tsx'
+  if (manifest[entryKey] === undefined) {
+    console.error('Storefront entry missing from the Vite manifest.')
+    process.exit(1)
+  }
+
+  const cssFiles = collectCss(manifest, entryKey)
+  if (cssFiles.length === 0) {
+    // Fail loudly. An unstyled storefront still returns 200 and still contains
+    // every word of its content, so nothing downstream notices — and this exact
+    // bug shipped once already, because the entry's own `css` array is empty.
+    console.error(
+      `No stylesheet reachable from ${entryKey} in the Vite manifest. ` +
+        'The storefront would render unstyled.',
+    )
+    process.exit(1)
+  }
+
+  const styles = cssFiles.map((file) => `/${file}`)
+  // Read once at boot, not per request. The storefront's CSS is small enough to
+  // inline (see the comment at buildDocument) and re-reading it for every buyer
+  // would turn a fast page into a syscall per request.
+  const inlineCss = cssFiles
+    .map((file) => readFileSync(join(ROOT, 'dist/client', file), 'utf8'))
+    .join('')
+
+  const resolved: Assets = { scripts: [`/${manifest[entryKey].file}`], styles, inlineCss }
+  return {
+    loadRenderer: () => Promise.resolve(renderer),
+    assets: () => resolved,
+    middlewares: null,
+    transformHtml: (_url, html) => Promise.resolve(html),
+  }
+}
+
+interface ManifestChunk {
+  file: string
+  css?: string[]
+  imports?: string[]
+  dynamicImports?: string[]
+}
+
+type Manifest = Record<string, ManifestChunk>
+
+/**
+ * Every stylesheet reachable from an entry, transitively.
+ *
+ * Reading `manifest[entry].css` alone is wrong and quietly so: Rollup attributes
+ * CSS to the chunk that actually imports it, and because the dashboard and the
+ * storefront share a vendor chunk, Tailwind's single sheet lands on *that* chunk
+ * rather than on either entry. The entry's own `css` array is empty, so the
+ * naive read produced a production storefront with no styling at all — which
+ * still returns 200 with all its content present, and so looks fine to every
+ * check that is not a pair of eyes.
+ */
+function collectCss(manifest: Manifest, entry: string): string[] {
+  const seen = new Set<string>()
+  const css: string[] = []
+
+  const walk = (key: string): void => {
+    if (seen.has(key)) return
+    seen.add(key)
+    const chunk = manifest[key]
+    if (chunk === undefined) return
+    for (const file of chunk.css ?? []) {
+      if (!css.includes(file)) css.push(file)
+    }
+    // Static imports only. A dynamic import's CSS is loaded by the browser when
+    // that chunk is actually requested; inlining it here would ship styles for
+    // code this page may never run.
+    for (const next of chunk.imports ?? []) walk(next)
+  }
+
+  walk(entry)
+  return css
+}
+
+// ---------------------------------------------------------------------------
+// Request handling
+// ---------------------------------------------------------------------------
+
+async function handle(
+  request: IncomingMessage,
+  response: ServerResponse,
+  context: {
+    supabase: SupabaseConfig
+    loadRenderer: () => Promise<Renderer>
+    assets: () => Assets
+    middlewares: Middlewares
+    transformHtml: TransformHtml
+  },
+): Promise<void> {
+  const host = (request.headers.host ?? '').toLowerCase()
+  const hostname = host.split(':')[0] ?? ''
+  const url = new URL(request.url ?? '/', `http://${host || 'localhost'}`)
+
+  // `.localhost` subdomains resolve to 127.0.0.1 in every modern browser, so
+  // `rheas-finds.localhost:5174` exercises the real subdomain path in dev.
+  const surface = resolveSurface(hostname, {
+    rootDomain: hostname.endsWith('.localhost') || hostname === 'localhost' ? 'localhost' : ROOT_DOMAIN,
+  })
+
+  // The dashboard is not this server's job — hand it the SPA shell and let the
+  // client take over.
+  if (surface.kind === 'dashboard') {
+    return serveDashboard(request, response, context)
+  }
+
+  const slug = surface.kind === 'storefront' ? surface.slug : null
+  const domain = surface.kind === 'custom-domain' ? surface.hostname : null
+
+  if (IS_PRODUCTION && (await serveStatic(url.pathname, response))) return
+
+  // Dev: let Vite serve modules, HMR and public assets.
+  if (context.middlewares !== null && isViteAsset(url.pathname)) {
+    return new Promise<void>((resolveRequest) => {
+      context.middlewares!(request, response, () => {
+        response.writeHead(404).end()
+        resolveRequest()
+      })
+      response.on('close', () => resolveRequest())
+    })
+  }
+
+  if (url.pathname === '/robots.txt') {
+    return sendText(request, response, robotsTxt(url.origin), 'text/plain; charset=utf-8')
+  }
+
+  if (url.pathname === '/sitemap.xml') {
+    const sitemap = await buildSitemap(context.supabase, { slug, domain, origin: url.origin })
+    if (sitemap === null) return sendNotFoundXml(response)
+    return sendText(request, response, sitemap, 'application/xml; charset=utf-8')
+  }
+
+  const data = await loadPageData(context.supabase, { slug, domain, url, hostname })
+  const { render } = await context.loadRenderer()
+
+  const rendered = render({
+    data,
+    origin: url.origin,
+    storageOrigin: context.supabase.url,
+    path: `${url.pathname}${url.search}`,
+  })
+
+  const document = await context.transformHtml(
+    url.pathname,
+    buildDocument(rendered, context.assets(), data),
+  )
+  sendHtml(request, response, document, rendered.status)
+}
+
+async function loadPageData(
+  supabase: SupabaseConfig,
+  input: { slug: string | null; domain: string | null; url: URL; hostname: string },
+): Promise<PageData> {
+  const { slug, domain, url, hostname } = input
+  const productMatch = /^\/p\/([A-Za-z0-9-]{1,120})\/?$/.exec(url.pathname)
+
+  try {
+    if (productMatch !== null) {
+      const payload = await rpc<ProductPayload | null>(supabase, 'storefront_product_page', {
+        p_product_slug: productMatch[1],
+        p_slug: slug,
+        p_domain: domain,
+      })
+      if (payload === null) return { route: 'not-found', store: null, hostname }
+      return { route: 'product', payload }
+    }
+
+    if (url.pathname !== '/') {
+      // Unknown path. Still resolve the store so the 404 can be branded.
+      const home = await rpc<HomePayload | null>(supabase, 'storefront_home', {
+        p_slug: slug,
+        p_domain: domain,
+        p_limit: 1,
+      })
+      return { route: 'not-found', store: home?.store ?? null, hostname }
+    }
+
+    const category = url.searchParams.get('category')
+    const search = url.searchParams.get('q')
+    const payload = await rpc<HomePayload | null>(supabase, 'storefront_home', {
+      p_slug: slug,
+      p_domain: domain,
+      p_category: category === null || category.trim() === '' ? null : category.trim(),
+      p_search: search === null || search.trim() === '' ? null : search.trim(),
+    })
+
+    if (payload === null) return { route: 'not-found', store: null, hostname }
+    return {
+      route: 'home',
+      payload,
+      query: {
+        category: category === null || category.trim() === '' ? null : category.trim(),
+        search: search === null || search.trim() === '' ? null : search.trim(),
+      },
+    }
+  } catch (error) {
+    // A database failure must not render a page that says "no such store" — that
+    // would tell a seller their shop is gone during an outage. Re-raise so the
+    // 500 handler reports the truth.
+    console.error('[storefront] data load failed', error)
+    throw error
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Document assembly
+// ---------------------------------------------------------------------------
+
+function buildDocument(
+  rendered: Awaited<ReturnType<Renderer['render']>>,
+  assets: Assets,
+  data: PageData,
+): string {
+  const lang = (data.route === 'not-found' ? data.store?.locale : data.payload.store.locale) ?? 'en'
+  const themeColor =
+    data.route === 'not-found' ? null : (data.payload.store.brandColor ?? null)
+
+  // Order matters and is load-bearing: the theme goes AFTER the app stylesheet.
+  // index.css declares `--primary` on `:root`, the theme re-declares it on `:root`,
+  // and equal specificity means the later rule wins. Emitting the theme first
+  // rendered every store in Selld's default green with the seller's real colour
+  // sitting inert in the document a few lines above.
+  //
+  // CSS is inlined rather than linked in production. The whole sheet is ~30KB
+  // raw / ~7KB compressed, which is less than the cost of the extra round trip
+  // it would take to fetch it — and a linked stylesheet is render-blocking, so
+  // that round trip lands directly on LCP. The trade is that it is re-sent with
+  // every document instead of being cached separately; at this size, and with the
+  // document itself CDN-cacheable, that is the cheaper side.
+  const styleTags =
+    assets.inlineCss === ''
+      ? assets.styles.map((href) => `<link rel="stylesheet" href="${href}" />`).join('')
+      : `<style>${assets.inlineCss}</style>`
+
+  const scriptTags = hydrationBootstrap(assets.scripts)
+
+  return `<!doctype html>
+<html lang="${lang}">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+${themeColor === null ? '' : `<meta name="theme-color" content="${themeColor}" />`}
+<link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+<title>${rendered.title}</title>
+${rendered.preload}
+${rendered.head}
+${styleTags}
+${rendered.themeCss === '' ? '' : `<style id="selld-theme">${rendered.themeCss}</style>`}
+</head>
+<body>
+<div id="root">${rendered.html}</div>
+<script type="application/json" id="selld-state">${rendered.state}</script>
+${scriptTags}
+</body>
+</html>`
+}
+
+/**
+ * Load the hydration bundle only once it cannot hurt the LCP.
+ *
+ * `<script type="module">` is deferred in *execution*, which is why it does not
+ * block first paint — but the browser still starts *downloading* it immediately,
+ * at a priority that competes with images. Measured on the home page: the React
+ * vendor chunk is ~193KB, which is about a second of a 1.6 Mbps link, and it was
+ * being fetched in parallel with the LCP image. LCP sat at 2.7s against a 2.0s
+ * budget with the network otherwise almost idle.
+ *
+ * This surface can afford to wait, because nothing on it is broken before
+ * hydration: navigation is real links, search is a real GET form, and the price,
+ * stock state and sold-out styling are all in the server-rendered HTML. Hydration
+ * only adds the variant picker and the image gallery.
+ *
+ * So the script is injected after `load`, during idle time — or immediately on the
+ * first interaction, whichever comes first. A buyer who taps a size straight away
+ * does not wait for an idle callback that may never come.
+ *
+ * The injected scripts also carry `fetchpriority="low"`. A dynamically created
+ * script element defaults to High, so without it the hydration bundle competes
+ * with the LCP image for bandwidth even though it was requested later — and on a
+ * product page, where the LCP image is the largest single asset, that is exactly
+ * the transfer that must not be crowded out.
+ *
+ * The inline bootstrap is ~450 bytes and deliberately ES5: it runs before any of
+ * our own code, on whatever browser a buyer happens to have.
+ */
+function hydrationBootstrap(scripts: string[]): string {
+  if (scripts.length === 0) return ''
+  const list = JSON.stringify(scripts)
+
+  return `<script>(function(){var s=${list},d=0;function go(){if(d)return;d=1;for(var i=0;i<s.length;i++){var e=document.createElement('script');e.type='module';e.src=s[i];e.fetchPriority='low';document.head.appendChild(e)}}function idle(){if(window.requestIdleCallback){requestIdleCallback(go,{timeout:2500})}else{setTimeout(go,200)}}if(document.readyState==='complete'){idle()}else{addEventListener('load',idle)}var t=['pointerdown','touchstart','keydown'];for(var j=0;j<t.length;j++){addEventListener(t[j],go,{once:true,passive:true})}})()</script>`
+}
+
+// ---------------------------------------------------------------------------
+// Static assets, robots, sitemap
+// ---------------------------------------------------------------------------
+
+const MIME: Record<string, string> = {
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.avif': 'image/avif',
+  '.ico': 'image/x-icon',
+  '.woff2': 'font/woff2',
+  '.json': 'application/json; charset=utf-8',
+  '.map': 'application/json; charset=utf-8',
+  '.txt': 'text/plain; charset=utf-8',
+}
+
+async function serveStatic(pathname: string, response: ServerResponse): Promise<boolean> {
+  if (pathname === '/' || pathname.endsWith('/')) return false
+
+  // Normalise before joining. Without this, `/assets/../../.env` escapes the
+  // build directory and serves whatever it lands on.
+  const safe = normalize(pathname).replace(/^(\.\.[/\\])+/, '')
+  const file = join(ROOT, 'dist/client', safe)
+  if (!file.startsWith(join(ROOT, 'dist/client'))) return false
+  if (!existsSync(file)) return false
+
+  const type = MIME[extname(file).toLowerCase()] ?? 'application/octet-stream'
+  response.writeHead(200, {
+    'Content-Type': type,
+    // Hashed filenames are immutable; anything else gets a short TTL.
+    'Cache-Control': safe.includes('/assets/')
+      ? 'public, max-age=31536000, immutable'
+      : 'public, max-age=3600',
+  })
+  createReadStream(file).pipe(response)
+  return true
+}
+
+function isViteAsset(pathname: string): boolean {
+  return (
+    pathname.startsWith('/@') ||
+    pathname.startsWith('/src/') ||
+    pathname.startsWith('/node_modules/') ||
+    pathname.startsWith('/favicon') ||
+    /\.(?:js|ts|tsx|css|svg|png|jpe?g|webp|avif|ico|woff2?|map)$/.test(pathname)
+  )
+}
+
+function robotsTxt(origin: string): string {
+  return [
+    'User-agent: *',
+    'Allow: /',
+    // Search result pages are noindex in the head too; disallowing the crawl
+    // saves the budget rather than spending it to read a noindex.
+    'Disallow: /?q=',
+    `Sitemap: ${origin}/sitemap.xml`,
+    '',
+  ].join('\n')
+}
+
+async function buildSitemap(
+  supabase: SupabaseConfig,
+  input: { slug: string | null; domain: string | null; origin: string },
+): Promise<string | null> {
+  const data = await rpc<{
+    slug: string
+    products: { slug: string; updatedAt: string }[]
+    categories: string[]
+  } | null>(supabase, 'storefront_sitemap', { p_slug: input.slug, p_domain: input.domain })
+
+  if (data === null) return null
+
+  const urls = [
+    `<url><loc>${input.origin}/</loc><changefreq>daily</changefreq><priority>1.0</priority></url>`,
+    ...data.categories
+      .filter((slug) => typeof slug === 'string')
+      .map(
+        (slug) =>
+          `<url><loc>${input.origin}/?category=${encodeURIComponent(slug)}</loc><changefreq>daily</changefreq><priority>0.7</priority></url>`,
+      ),
+    ...data.products.map(
+      (product) =>
+        `<url><loc>${input.origin}/p/${encodeURIComponent(product.slug)}</loc><lastmod>${product.updatedAt.slice(0, 10)}</lastmod><priority>0.8</priority></url>`,
+    ),
+  ]
+
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls.join('')}</urlset>`
+}
+
+function sendNotFoundXml(response: ServerResponse): void {
+  response.writeHead(404, { 'Content-Type': 'application/xml; charset=utf-8' })
+  response.end('<?xml version="1.0" encoding="UTF-8"?><urlset />')
+}
+
+function serveDashboard(
+  request: IncomingMessage,
+  response: ServerResponse,
+  context: { middlewares: Middlewares },
+): Promise<void> | void {
+  if (context.middlewares !== null) {
+    return new Promise<void>((resolveRequest) => {
+      context.middlewares!(request, response, () => {
+        response.writeHead(404).end()
+        resolveRequest()
+      })
+      response.on('close', () => resolveRequest())
+    })
+  }
+
+  const shell = join(ROOT, 'dist/client/index.html')
+  if (!existsSync(shell)) {
+    response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' })
+    response.end('Dashboard build missing.')
+    return
+  }
+  response.writeHead(200, {
+    'Content-Type': 'text/html; charset=utf-8',
+    'Cache-Control': 'no-cache',
+  })
+  response.end(readFileSync(shell))
+}
+
+// ---------------------------------------------------------------------------
+// Response helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Compress before sending.
+ *
+ * A server-rendered document with inlined CSS is ~40KB of text. Uncompressed,
+ * that is a third of the 3G budget spent on bytes a compressor removes for free;
+ * this single step is worth more to the LCP score than any component-level
+ * optimisation in this phase.
+ */
+function compress(
+  request: IncomingMessage,
+  body: string,
+): { payload: Buffer | string; encoding: string | null } {
+  const accepted = (request.headers['accept-encoding'] ?? '').toString()
+  if (/\bbr\b/.test(accepted)) return { payload: brotliCompressSync(body), encoding: 'br' }
+  if (/\bgzip\b/.test(accepted)) return { payload: gzipSync(body), encoding: 'gzip' }
+  return { payload: body, encoding: null }
+}
+
+function sendHtml(
+  request: IncomingMessage,
+  response: ServerResponse,
+  body: string,
+  status: number,
+): void {
+  const { payload, encoding } = compress(request, body)
+  response.writeHead(status, {
+    'Content-Type': 'text/html; charset=utf-8',
+    ...(encoding === null ? {} : { 'Content-Encoding': encoding }),
+    Vary: 'Accept-Encoding',
+    // The document is public and identical for every buyer, so a CDN can serve
+    // it. `s-maxage` lets the edge cache it while `max-age=0` keeps the browser
+    // revalidating, so a seller's price change is visible immediately on reload.
+    'Cache-Control':
+      status === 200
+        ? 'public, max-age=0, s-maxage=60, stale-while-revalidate=300'
+        : 'public, max-age=0, s-maxage=30',
+    'X-Content-Type-Options': 'nosniff',
+    'Referrer-Policy': 'strict-origin-when-cross-origin',
+  })
+  response.end(payload)
+}
+
+function sendText(
+  request: IncomingMessage,
+  response: ServerResponse,
+  body: string,
+  type: string,
+): void {
+  const { payload, encoding } = compress(request, body)
+  response.writeHead(200, {
+    'Content-Type': type,
+    ...(encoding === null ? {} : { 'Content-Encoding': encoding }),
+    Vary: 'Accept-Encoding',
+    'Cache-Control': 'public, max-age=300, s-maxage=3600',
+  })
+  response.end(payload)
+}
+
+void main()

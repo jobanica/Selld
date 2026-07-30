@@ -90,4 +90,33 @@ export function initI18n(locale: Locale = detectLocale()) {
   return i18next
 }
 
+/**
+ * An isolated i18next instance, for server rendering.
+ *
+ * {@link initI18n} configures the shared singleton, which is right in a browser
+ * — one user, one locale, set once. It is wrong on a server: the `initialised`
+ * guard means the *first* request's locale would silently apply to every later
+ * one, so one Taglish store would render every English store in Taglish until
+ * the process restarted.
+ *
+ * Each render gets its own instance instead. `initAsync: false` makes
+ * initialisation synchronous, which it must be — `renderToString` cannot await.
+ * (The option was `initImmediate` before i18next v21; it is `initAsync` now, and
+ * passing the old name is silently ignored rather than rejected at runtime.)
+ */
+export function createI18nInstance(locale: Locale) {
+  const instance = i18next.createInstance()
+  void instance.use(initReactI18next).init({
+    resources,
+    lng: locale,
+    fallbackLng: DEFAULT_LOCALE,
+    defaultNS: 'common',
+    ns: ['common'],
+    interpolation: { escapeValue: false },
+    returnNull: false,
+    initAsync: false,
+  })
+  return instance
+}
+
 export { i18next }

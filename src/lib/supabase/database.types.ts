@@ -423,6 +423,7 @@ export type Database = {
           created_at: string
           id: string
           product_id: string
+          renditions: number[]
           sort_order: number
           storage_path: string
           tenant_id: string
@@ -433,6 +434,7 @@ export type Database = {
           created_at?: string
           id?: string
           product_id: string
+          renditions?: number[]
           sort_order?: number
           storage_path: string
           tenant_id: string
@@ -443,6 +445,7 @@ export type Database = {
           created_at?: string
           id?: string
           product_id?: string
+          renditions?: number[]
           sort_order?: number
           storage_path?: string
           tenant_id?: string
@@ -545,6 +548,13 @@ export type Database = {
             columns: ["tenant_id", "option_id"]
             isOneToOne: false
             referencedRelation: "product_options"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "product_option_values_tenant_id_option_id_fkey"
+            columns: ["tenant_id", "option_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_product_options"
             referencedColumns: ["tenant_id", "id"]
           },
         ]
@@ -1379,16 +1389,95 @@ export type Database = {
           },
         ]
       }
+      storefront_option_values: {
+        Row: {
+          id: string | null
+          option_id: string | null
+          sort_order: number | null
+          tenant_id: string | null
+          value: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_option_values_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_option_values_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_option_values_tenant_id_option_id_fkey"
+            columns: ["tenant_id", "option_id"]
+            isOneToOne: false
+            referencedRelation: "product_options"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "product_option_values_tenant_id_option_id_fkey"
+            columns: ["tenant_id", "option_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_product_options"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
       storefront_product_images: {
         Row: {
           alt: string | null
           id: string | null
           product_id: string | null
+          renditions: number[] | null
           sort_order: number | null
           storage_path: string | null
           variant_id: string | null
         }
         Relationships: []
+      }
+      storefront_product_options: {
+        Row: {
+          id: string | null
+          name: string | null
+          product_id: string | null
+          sort_order: number | null
+          tenant_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "product_options_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_options_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "product_options_tenant_id_product_id_fkey"
+            columns: ["tenant_id", "product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "product_options_tenant_id_product_id_fkey"
+            columns: ["tenant_id", "product_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_products"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
       }
       storefront_products: {
         Row: {
@@ -1581,6 +1670,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      image_widths_are_sane: { Args: { p_widths: number[] }; Returns: boolean }
       is_reserved_tenant_slug: { Args: { slug: string }; Returns: boolean }
       is_tenant_member: { Args: { p_tenant_id: string }; Returns: boolean }
       is_valid_tenant_slug: { Args: { slug: string }; Returns: boolean }
@@ -1649,6 +1739,41 @@ export type Database = {
         Returns: undefined
       }
       storage_path_tenant_id: { Args: { p_name: string }; Returns: string }
+      storefront_home: {
+        Args: {
+          p_category?: string
+          p_domain?: string
+          p_limit?: number
+          p_offset?: number
+          p_search?: string
+          p_slug?: string
+        }
+        Returns: Json
+      }
+      storefront_product_cards: {
+        Args: {
+          p_category?: string
+          p_exclude?: string
+          p_limit?: number
+          p_offset?: number
+          p_search?: string
+          p_tenant_id: string
+        }
+        Returns: Json
+      }
+      storefront_product_page: {
+        Args: { p_domain?: string; p_product_slug: string; p_slug?: string }
+        Returns: Json
+      }
+      storefront_sitemap: {
+        Args: { p_domain?: string; p_slug?: string }
+        Returns: Json
+      }
+      storefront_store_json: { Args: { p_tenant_id: string }; Returns: Json }
+      storefront_tenant_id: {
+        Args: { p_domain?: string; p_slug?: string }
+        Returns: string
+      }
       tenant_role_of: {
         Args: { p_tenant_id: string }
         Returns: Database["public"]["Enums"]["tenant_role"]

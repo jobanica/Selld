@@ -142,6 +142,20 @@ $$;
 \echo ''
 \echo '=== Fixtures'
 
+-- Start from an empty slate.
+--
+-- The suite assumes it owns the database: it asserts absolute counts ("Rhea can
+-- read exactly 1 tenant"), which any pre-existing row breaks. That is fine in CI,
+-- where the database is created for the run, but `pnpm seed:demo` also creates a
+-- store called `rheas-finds` — so a developer who seeds the storefront and then
+-- runs the security suite got a unique-violation on the fixture instead of a test
+-- result.
+--
+-- Safe because everything here runs inside the transaction this file rolls back at
+-- the end: the delete is undone along with the fixtures.
+delete from public.tenants;
+delete from auth.users;
+
 -- Rhea (the avatar), Marlon (an unrelated seller), Jess (Rhea's packer),
 -- and Nica (authenticated but belongs to no tenant at all).
 insert into auth.users (id, email, raw_user_meta_data) values
@@ -1263,6 +1277,173 @@ reset role;
 set local role authenticated;
 
 -- ---------------------------------------------------------------------------
+-- Phase 5: the storefront read model
+-- ---------------------------------------------------------------------------
+-- Every page of a storefront is rendered by an anonymous request, so these
+-- functions are the widest anonymous surface in the product. They read the
+-- storefront_* projections rather than the base tables, and that boundary is
+-- what the assertions below pin down.
+\echo ''
+\echo '=== Phase 5: storefront read model'
+
+-- Restore two things earlier sections deliberately switched off.
+--
+-- `whitening-soap` was left as a draft to prove drafts are invisible, and Marlon's
+-- tenant was left suspended to prove a suspended store goes dark. Both need to be
+-- live here, and the second one matters more than it looks: with Marlon suspended,
+-- the cross-tenant assertion below passes because his *store* cannot be resolved,
+-- not because his store refuses to serve Rhea's product. That is a test that
+-- passes for the wrong reason and would keep passing if the isolation broke.
+reset role;
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+  update public.products set status = 'active' where slug = 'whitening-soap';
+  update public.tenants  set status = 'active' where id = i.marlon_tenant;
+end;
+$$;
+
+set local role anon;
+select tests.logout();
+do $$
+declare
+  i        record;
+  v_home   jsonb;
+  v_page   jsonb;
+  v_text   text;
+begin
+  select * into i from tests.ids;
+
+  -- Resolution ------------------------------------------------------------
+  perform tests.eq(public.storefront_tenant_id('rheas-finds'), i.rhea_tenant,
+    'anon resolves a store by slug');
+  perform tests.ok(public.storefront_tenant_id('no-such-store') is null,
+    'an unknown slug resolves to null, not an error');
+  perform tests.ok(public.storefront_tenant_id(null, 'not-a-domain.example') is null,
+    'an unknown custom domain resolves to null');
+
+  -- A Host header is attacker-controlled. Passing both must never let a domain
+  -- override an explicit slug, or one store could be rendered under another's.
+  perform tests.eq(public.storefront_tenant_id('rheas-finds', 'marlon-kicks.example'),
+    i.rhea_tenant, 'slug wins over a supplied domain');
+
+  -- Home page -------------------------------------------------------------
+  v_home := public.storefront_home('rheas-finds');
+  perform tests.ok(v_home is not null, 'anon can render the home page');
+  perform tests.eq(v_home -> 'store' ->> 'slug', 'rheas-finds',
+    'and it carries the right store');
+  perform tests.ok(public.storefront_home('no-such-store') is null,
+    'a missing store returns null so the server can send a real 404');
+
+  -- Cross-tenant: Rhea's home must contain none of Marlon's catalog.
+  v_text := v_home::text;
+  perform tests.ok(v_text not like '%marlon%',
+    'one store''s home page contains nothing of another''s');
+
+  -- The whole reason cost_centavos is excluded from the projections.
+  perform tests.ok(v_text not ilike '%cost%',
+    'the home payload never mentions cost');
+  perform tests.ok(v_text not like '%on_hand%' and v_text not like '%reserved%',
+    'and never exposes stock counts');
+
+  -- Product page ----------------------------------------------------------
+  v_page := public.storefront_product_page('whitening-soap', 'rheas-finds');
+  perform tests.ok(v_page is not null, 'anon can render a product page');
+  perform tests.ok(v_page -> 'product' is not null, 'the product is present');
+  perform tests.ok((v_page -> 'variants') <> '[]'::jsonb, 'with its variants');
+  perform tests.ok(v_page::text not ilike '%cost%',
+    'the product payload never mentions cost');
+
+  -- A product that does not exist still returns the store, so the 404 page can
+  -- be branded — but `product` must be null so the server sends 404 not 200.
+  v_page := public.storefront_product_page('no-such-product', 'rheas-finds');
+  perform tests.ok(v_page is not null and v_page -> 'store' is not null,
+    'an unknown product still resolves the store for a branded 404');
+  perform tests.ok(v_page -> 'product' = 'null'::jsonb,
+    'and reports the product as null');
+
+  -- Asking for one store's product under another store's slug must not find it.
+  perform tests.ok(
+    public.storefront_product_page('whitening-soap', 'marlon-kicks') -> 'product'
+      = 'null'::jsonb,
+    'a product cannot be fetched through another store''s slug');
+
+  -- Paging is clamped, not trusted -----------------------------------------
+  -- p_limit arrives from a query string. Unbounded, it turns the catalog into a
+  -- single-request scrape.
+  perform tests.ok(
+    jsonb_array_length(public.storefront_home('rheas-finds', null, null, null, 100000) -> 'products')
+      <= 96,
+    'an absurd page size is clamped');
+  perform tests.ok(
+    jsonb_array_length(public.storefront_home('rheas-finds', null, null, null, -5) -> 'products')
+      >= 1,
+    'a negative page size still returns something');
+
+  -- Sitemap ---------------------------------------------------------------
+  perform tests.ok(public.storefront_sitemap('rheas-finds') is not null,
+    'anon can read the sitemap payload');
+  perform tests.ok(public.storefront_sitemap('no-such-store') is null,
+    'and gets null for a store that does not exist');
+end;
+$$;
+
+-- The option matrix reaches the picker through owner-run views, NOT through a
+-- grant on the base tables. If someone "simplifies" that later, these fail.
+do $$
+begin
+  perform tests.rejects($q$ select count(*) from public.product_options $q$,
+    'anon has no privilege on product_options');
+  perform tests.rejects($q$ select count(*) from public.product_option_values $q$,
+    'anon has no privilege on product_option_values');
+  perform tests.ok((select count(*) from public.storefront_product_options) >= 0,
+    'anon CAN read the option-name projection');
+  perform tests.ok((select count(*) from public.storefront_option_values) >= 0,
+    'anon CAN read the option-value projection');
+end;
+$$;
+
+-- A suspended store must go dark everywhere at once. Suspension is how a
+-- non-paying or abusive tenant is switched off, so a projection that ignores it
+-- keeps serving a store we meant to stop serving.
+reset role;
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+  update public.tenants set status = 'suspended' where id = i.rhea_tenant;
+end;
+$$;
+
+set local role anon;
+select tests.logout();
+do $$
+begin
+  perform tests.ok(public.storefront_tenant_id('rheas-finds') is null,
+    'a suspended store stops resolving');
+  perform tests.ok(public.storefront_home('rheas-finds') is null,
+    'a suspended store''s home page is gone');
+  perform tests.ok(
+    public.storefront_product_page('whitening-soap', 'rheas-finds') is null,
+    'and so are its product pages');
+  perform tests.eq((select count(*)::int from public.storefront_products), 0,
+    'and it disappears from the catalog projection');
+end;
+$$;
+
+reset role;
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+  update public.tenants set status = 'active' where id = i.rhea_tenant;
+end;
+$$;
+
+set local role authenticated;
+
+-- ---------------------------------------------------------------------------
 -- my_tenants()
 -- ---------------------------------------------------------------------------
 \echo ''
@@ -1299,8 +1480,8 @@ declare v_passed int := coalesce(nullif(current_setting('tests.passed', true), '
 begin
   raise notice '';
   raise notice '=== % assertions passed', v_passed;
-  if v_passed < 155 then
-    raise exception 'Expected at least 155 assertions, only % ran — did a section get skipped?', v_passed
+  if v_passed < 185 then
+    raise exception 'Expected at least 185 assertions, only % ran — did a section get skipped?', v_passed
       using errcode = 'triggered_action_exception';
   end if;
 end;

@@ -5,7 +5,7 @@ Build one phase per session, in order. The full roadmap is in
 [`docs/build-spec.md`](docs/build-spec.md); who we're building for is in
 [`docs/avatar.md`](docs/avatar.md).
 
-**Current state: phase 4 complete.** Next up is phase 5 (storefront).
+**Current state: phase 5 complete.** Next up is phase 6 (cart & guest checkout).
 
 ---
 
@@ -13,9 +13,13 @@ Build one phase per session, in order. The full roadmap is in
 
 ```bash
 pnpm install          # pnpm, not npm — see "Package manager" below
-pnpm dev              # dev server on :5173
+pnpm dev              # dashboard SPA (Vite) on :5173
+pnpm dev:store        # storefront SSR server on :5174 — try rheas-finds.localhost:5174
 pnpm verify           # typecheck + lint + test + build — run before every commit
 pnpm test:watch       # tests in watch mode
+pnpm start            # production storefront server (needs `pnpm build` first)
+pnpm seed:demo        # demo store + generated product images, for storefront work
+pnpm lighthouse       # Lighthouse mobile against a running `pnpm start`
 
 pnpm db:start         # Supabase local stack (needs Docker)
 pnpm db:reset         # reset + re-run migrations, then reseed PSGC
@@ -102,6 +106,53 @@ Gotchas learned the hard way:
 - **Never expose a bearer token through a `SELECT` policy.** `invitations.token` has
   no read policy at all; redemption goes through `accept_invitation()`, which also
   checks the token was issued to the caller's own email.
+
+## The two surfaces render differently
+
+The dashboard is a client-rendered SPA. The storefront is **server-rendered** by
+`server/storefront-server.ts` (Node), because it carries an LCP < 2.0s on 3G
+budget and a CSR load cannot meet it — HTML, then JS, then boot, then a data
+fetch is four sequential round trips before anything paints, and at 150ms RTT the
+round trips alone blow the budget. Prerendering at build time was the other option
+the brief allowed and does not work here: sellers create stores at runtime, so the
+page set is unknown when the build runs.
+
+```
+pnpm build  ->  dist/client   (SPA shell + storefront hydration bundle + manifest)
+            ->  dist/server   (entry-server.js, the SSR renderer)
+```
+
+Things that follow from that, and will bite if forgotten:
+
+- **The storefront has no client-side router.** Navigation is real `<a href>`,
+  search is a real GET form. That is what makes every page crawlable and readable
+  before JS, and keeps `react-router` out of a buyer's bundle. Verified by a test
+  that drives the store with JavaScript disabled.
+- **One round trip per page.** `storefront_home()` and `storefront_product_page()`
+  each return the entire page as one jsonb document. Adding a second query to a
+  page costs a buyer 150ms of latency, not just a query.
+- **The payload is inlined for hydration**, so the client never re-fetches and
+  `@supabase/supabase-js` stays out of the storefront bundle. The server talks to
+  PostgREST with plain `fetch` (`server/supabase-rpc.ts`).
+- **Hydration is deliberately deferred** to idle-after-load, or to the first
+  interaction, whichever comes first — see `hydrationBootstrap()`. A
+  `type="module"` script does not block paint but the browser still *downloads* it
+  at a priority that competes with the LCP image; on the product page that cost
+  ~1.3s of LCP. The injected scripts also carry `fetchpriority="low"`, because a
+  dynamically created script element otherwise defaults to High.
+- **Theme CSS is emitted after the app stylesheet and uses `html:root`.**
+  index.css declares the same custom properties on `:root`; equal specificity means
+  source order wins, and in dev Vite appends the app CSS at runtime so ours can
+  never be last. Getting this wrong renders every store in Selld green with the
+  seller's real colour sitting inert in the document.
+- **In dev the document must go through `vite.transformIndexHtml()`.** Hand-built
+  HTML skips the React Refresh preamble, and the failure is total but silent:
+  no preamble → the client module throws → no hydration → and because dev serves
+  CSS through the module graph, no styles either.
+- **`sizes`/`srcset` constants live in `src/storefront/image-config.ts`.** The
+  server's LCP `<link rel="preload">` and the `<img>` must agree; if `imagesizes`
+  and `sizes` disagree they can resolve to different candidates and the browser
+  downloads both.
 
 ## Architecture
 
@@ -195,6 +246,30 @@ one new file plus one registry line, and zero lines of order logic.
   inputs showing the old price — saved correctly, looked broken.
   `src/features/catalog/variant-grid.test.tsx` guards it. Adjust state from props
   *during render*, never in an effect.
+- **`fetchPriority` is React 19. On React 18 use lowercase `fetchpriority`.**
+  Same family as the `forwardRef` trap above. `react-dom/server` writes the
+  camelCase prop out verbatim and HTML attributes are case-insensitive, so it
+  *works* — while `react-dom/client` warns for every image on the page during
+  hydration. Use `priorityAttrs()` from `src/storefront/image-config.ts`.
+- **i18next plural keys are `_one`/`_other`, never `_plural`.** The `_plural`
+  suffix is i18next v3; from v21 the JSON v4 format expects CLDR category
+  suffixes. Nothing warns — the lookup just misses and falls back to the
+  singular, so `{{count}} items` rendered as "3 item" through two whole phases.
+  `src/lib/i18n/plurals.test.ts` guards it. In `tl` both forms carry the same
+  text on purpose: Tagalog nouns are not inflected for number, which is also why
+  CLDR puts 2 and 3 in tl's `one` category.
+- **Server rendering needs `createI18nInstance()`, not `initI18n()`.** The
+  singleton's `initialised` guard is right for a browser and wrong for a server:
+  the first request's locale would apply to every later one, so one Taglish store
+  would render every English store in Taglish until the process restarted.
+- **A CHECK constraint may not contain a subquery.** Testing "every element of an
+  array satisfies P" needs one, so it goes through an `IMMUTABLE` helper —
+  see `image_widths_are_sane()` in `20260730000800`.
+- **Read the Vite manifest transitively.** Rollup attributes CSS to the chunk that
+  imports it, and because the dashboard and storefront share a vendor chunk,
+  Tailwind's sheet lands there rather than on either entry. `manifest[entry].css`
+  is empty, and reading only that shipped a completely unstyled storefront that
+  still returned 200 with every word of its content present.
 - **`t()` keys must stay literal types.** A `Record<number, \`onboarding.${string}\`>`
   lookup compiles but loses key checking; use `as const` arrays/objects so the
   literal survives.
