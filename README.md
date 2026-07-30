@@ -5,7 +5,7 @@
 Multi-tenant ecommerce + order operations platform for Philippine social sellers.
 Working name: **Selld** (`selld.ph` / `selld.store`).
 
-> **Status: phase 2 (Store onboarding wizard) complete.** Next: phase 3, catalog.
+> **Status: phase 3 (Catalog) complete.** Next: phase 4, inventory.
 > See [`docs/phase-status.md`](docs/phase-status.md).
 
 ---
@@ -64,7 +64,7 @@ src/
   app/           ← dashboard (authenticated seller surface)
   storefront/    ← public buyer surface, separate perf budget
   features/      ← feature slices
-    address/  auth/  onboarding/  tenancy/
+    address/  auth/  catalog/  onboarding/  tenancy/
   lib/           ← money, phone, psgc, i18n, time, supabase, tenant
   components/ui  ← shadcn/ui primitives
 supabase/
@@ -108,7 +108,7 @@ naive UTC date splits one Manila morning across two buckets.
 **Tenant isolation is enforced in the database, not the client.** Every
 tenant-scoped policy funnels through `is_tenant_member(tenant_id)`, and
 [`supabase/tests/tenancy-isolation.sql`](supabase/tests/tenancy-isolation.sql)
-proves cross-tenant reads and writes return nothing — 105 assertions, run in CI on
+proves cross-tenant reads and writes return nothing — 129 assertions, run in CI on
 every PR. The suite is verified by sabotage: break RLS and it fails. Read the
 "Writing a tenant-scoped table" section of [`CLAUDE.md`](CLAUDE.md) before adding
 a table.

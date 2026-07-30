@@ -5,7 +5,7 @@ Build one phase per session, in order. The full roadmap is in
 [`docs/build-spec.md`](docs/build-spec.md); who we're building for is in
 [`docs/avatar.md`](docs/avatar.md).
 
-**Current state: phase 2 complete.** Next up is phase 3 (catalog).
+**Current state: phase 3 complete.** Next up is phase 4 (inventory).
 
 ---
 
@@ -111,7 +111,7 @@ src/
   app/          ← dashboard (authenticated seller surface)
   storefront/   ← public buyer surface, own perf budget
   features/     ← feature slices; may import from core and lib
-    address/ auth/ onboarding/ tenancy/
+    address/ auth/ catalog/ onboarding/ tenancy/
   lib/          ← money, phone, psgc, i18n, time, supabase, tenant
   components/ui ← shadcn/ui primitives
 ```
@@ -165,6 +165,21 @@ one new file plus one registry line, and zero lines of order logic.
   default rather than reach pricing logic as `NaN`.
 - **Never require a province.** NCR and 3 independent cities have none. Use
   `isAddressComplete()` and `PhAddressPicker`, which handle it.
+- **Denormalised `tenant_id` needs a composite FK, not a trigger.** Give the parent
+  `unique (tenant_id, id)` and have the child reference `(tenant_id, parent_id)`.
+  Postgres then makes a cross-tenant child unrepresentable — stronger than a policy,
+  because it holds even inside a `SECURITY DEFINER` function.
+- **Immediate triggers for row validity, deferred ones for cross-row invariants.**
+  A `DEFERRABLE INITIALLY DEFERRED` constraint trigger only fires at COMMIT, so it
+  cannot report which statement was at fault (and is invisible to a test that rolls
+  back). `product_variants` validates immediately; `product_options` re-validates
+  its product's variants deferred, because regenerating a matrix is legitimately
+  multi-statement.
+- **Controlled inputs, or bulk edits silently desync.** A `defaultValue` money input
+  ignores an external change, so "apply to all" updated state and left twelve
+  inputs showing the old price — saved correctly, looked broken.
+  `src/features/catalog/variant-grid.test.tsx` guards it. Adjust state from props
+  *during render*, never in an effect.
 - **`t()` keys must stay literal types.** A `Record<number, \`onboarding.${string}\`>`
   lookup compiles but loses key checking; use `as const` arrays/objects so the
   literal survives.

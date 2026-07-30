@@ -893,6 +893,187 @@ reset role;
 set local role authenticated;
 
 -- ---------------------------------------------------------------------------
+-- Phase 3 tables — catalog
+-- ---------------------------------------------------------------------------
+\echo ''
+\echo '=== Catalog (products, options, variants, images)'
+
+reset role;
+set local role authenticated;
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+
+-- Build a real 2-option product so the isolation checks have something to hide.
+do $$
+declare
+  i record; p uuid; o1 uuid; o2 uuid; s uuid; m uuid; blk uuid; wht uuid;
+begin
+  select * into i from tests.ids;
+
+  insert into public.categories (tenant_id, name, slug)
+  values (i.rhea_tenant, 'Skincare', 'skincare');
+
+  insert into public.products (tenant_id, name, slug, status)
+  values (i.rhea_tenant, 'Whitening Soap', 'whitening-soap', 'active') returning id into p;
+
+  insert into public.product_options (tenant_id, product_id, name, sort_order)
+  values (i.rhea_tenant, p, 'Size', 0) returning id into o1;
+  insert into public.product_options (tenant_id, product_id, name, sort_order)
+  values (i.rhea_tenant, p, 'Scent', 1) returning id into o2;
+
+  insert into public.product_option_values (tenant_id, option_id, value) values (i.rhea_tenant, o1, '135g') returning id into s;
+  insert into public.product_option_values (tenant_id, option_id, value) values (i.rhea_tenant, o1, '65g') returning id into m;
+  insert into public.product_option_values (tenant_id, option_id, value) values (i.rhea_tenant, o2, 'Kojic') returning id into blk;
+  insert into public.product_option_values (tenant_id, option_id, value) values (i.rhea_tenant, o2, 'Papaya') returning id into wht;
+
+  insert into public.product_variants (tenant_id, product_id, sku, price_centavos, option_value_ids) values
+    (i.rhea_tenant, p, 'RF-135-K', 14900, array[s, blk]),
+    (i.rhea_tenant, p, 'RF-135-P', 14900, array[s, wht]),
+    (i.rhea_tenant, p, 'RF-65-K',   8900, array[m, blk]),
+    (i.rhea_tenant, p, 'RF-65-P',   8900, array[m, wht]);
+
+  perform tests.eq((select count(*)::int from public.product_variants), 4,
+    'Rhea created a 2x2 variant matrix');
+  perform tests.eq((select count(*)::int from public.products), 1, 'Rhea sees her product');
+end;
+$$;
+
+-- Marlon must see none of it.
+select tests.login('22222222-2222-2222-2222-222222222222', 'marlon@example.ph');
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+  perform tests.eq((select count(*)::int from public.products), 0,
+    'Marlon cannot see Rhea''s products');
+  perform tests.eq((select count(*)::int from public.product_variants), 0,
+    'Marlon cannot see Rhea''s variants — where the prices live');
+  perform tests.eq((select count(*)::int from public.product_options), 0,
+    'Marlon cannot see Rhea''s options');
+  perform tests.eq((select count(*)::int from public.product_option_values), 0,
+    'Marlon cannot see Rhea''s option values');
+  perform tests.eq((select count(*)::int from public.categories), 0,
+    'Marlon cannot see Rhea''s categories');
+
+  -- A competitor reading cost_centavos would know her margins exactly.
+  perform tests.eq(
+    (select count(*)::int from public.product_variants where tenant_id = i.rhea_tenant), 0,
+    'Marlon cannot read Rhea''s costs even addressing her tenant directly');
+
+  perform tests.eq(
+    tests.affected(format($q$ update public.product_variants set price_centavos = 1 where tenant_id = %L $q$,
+      i.rhea_tenant)),
+    0::bigint, 'Marlon cannot reprice Rhea''s catalog');
+  perform tests.rejects(format(
+    $q$ insert into public.products (tenant_id, name, slug) values (%L, 'Injected', 'injected') $q$,
+    i.rhea_tenant),
+    'Marlon cannot insert a product into Rhea''s catalog');
+end;
+$$;
+
+-- The composite foreign keys make a cross-tenant child unrepresentable, which is
+-- a stronger guarantee than a policy: it holds even for a definer function.
+do $$
+declare i record; v_product uuid;
+begin
+  select * into i from tests.ids;
+  reset role;
+  select id into v_product from public.products where slug = 'whitening-soap';
+  set local role authenticated;
+  perform tests.rejects(format(
+    $q$ insert into public.product_options (tenant_id, product_id, name)
+        values (%L, %L, 'Stolen') $q$, i.marlon_tenant, v_product),
+    'composite FK blocks a child row claiming another tenant');
+end;
+$$;
+
+-- Role enforcement: a packer reads the catalog, never reprices it.
+select tests.login('33333333-3333-3333-3333-333333333333', 'jess@example.ph');
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+  perform tests.eq((select count(*)::int from public.products), 1,
+    'a packer can read products (needed to pick)');
+  perform tests.eq(
+    tests.affected($q$ update public.product_variants set price_centavos = 1 $q$),
+    0::bigint, 'a packer cannot change a price');
+  perform tests.rejects(format(
+    $q$ insert into public.products (tenant_id, name, slug) values (%L, 'X', 'x') $q$, i.rhea_tenant),
+    'a packer cannot create a product');
+end;
+$$;
+
+-- SKU uniqueness is per tenant: two sellers may legitimately use "RF-135-K".
+select tests.login('22222222-2222-2222-2222-222222222222', 'marlon@example.ph');
+do $$
+declare i record; p uuid;
+begin
+  select * into i from tests.ids;
+  insert into public.products (tenant_id, name, slug) values (i.marlon_tenant, 'Kicks', 'kicks')
+    returning id into p;
+  insert into public.product_variants (tenant_id, product_id, sku, price_centavos)
+  values (i.marlon_tenant, p, 'RF-135-K', 99900);
+  perform tests.ok(true, 'the same SKU is allowed in a different tenant');
+
+  perform tests.rejects(format(
+    $q$ insert into public.product_variants (tenant_id, product_id, sku, price_centavos)
+        values (%L, %L, 'RF-135-K', 88800) $q$, i.marlon_tenant, p),
+    'a duplicate SKU within one tenant is rejected');
+end;
+$$;
+
+-- Anonymous storefront: active products readable, costs never exposed.
+reset role;
+set local role anon;
+select tests.logout();
+do $$
+declare v_columns text[];
+begin
+  perform tests.rejects($q$ select count(*) from public.products $q$,
+    'anon has no privilege on products');
+  perform tests.rejects($q$ select count(*) from public.product_variants $q$,
+    'anon has no privilege on product_variants');
+
+  perform tests.eq((select count(*)::int from public.storefront_products), 1,
+    'anon CAN read active products through the projection');
+  perform tests.eq((select count(*)::int from public.storefront_variants), 4,
+    'anon CAN read purchasable variants');
+
+  select array_agg(column_name order by column_name) into v_columns
+  from information_schema.columns
+  where table_schema = 'public' and table_name = 'storefront_variants';
+  perform tests.ok(not ('cost_centavos' = any (v_columns)),
+    'storefront_variants does NOT expose cost_centavos — that is her margin');
+
+  select array_agg(column_name order by column_name) into v_columns
+  from information_schema.columns
+  where table_schema = 'public' and table_name = 'storefront_products';
+  perform tests.ok(not ('status' = any (v_columns)),
+    'storefront_products does not leak draft status');
+end;
+$$;
+
+-- A draft product must not appear on the storefront.
+reset role;
+do $$
+begin
+  update public.products set status = 'draft' where slug = 'whitening-soap';
+end;
+$$;
+set local role anon;
+do $$
+begin
+  perform tests.eq((select count(*)::int from public.storefront_products), 0,
+    'a draft product is invisible to buyers');
+  perform tests.eq((select count(*)::int from public.storefront_variants), 0,
+    'and so are its variants');
+end;
+$$;
+
+reset role;
+set local role authenticated;
+
+-- ---------------------------------------------------------------------------
 -- my_tenants()
 -- ---------------------------------------------------------------------------
 \echo ''
@@ -929,8 +1110,8 @@ declare v_passed int := coalesce(nullif(current_setting('tests.passed', true), '
 begin
   raise notice '';
   raise notice '=== % assertions passed', v_passed;
-  if v_passed < 100 then
-    raise exception 'Expected at least 100 assertions, only % ran — did a section get skipped?', v_passed
+  if v_passed < 125 then
+    raise exception 'Expected at least 125 assertions, only % ran — did a section get skipped?', v_passed
       using errcode = 'triggered_action_exception';
   end if;
 end;

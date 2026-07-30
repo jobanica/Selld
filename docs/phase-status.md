@@ -8,8 +8,8 @@ phase's scope and done-when criteria.
 | 0 | Foundation | ✅ Complete |
 | 1 | Auth & multi-tenant core | ✅ Complete |
 | 2 | Store onboarding wizard | ✅ Complete |
-| 3 | Catalog | ⬜ Next |
-| 4 | Inventory | ⬜ |
+| 3 | Catalog | ✅ Complete |
+| 4 | Inventory | ⬜ Next |
 | 5 | Storefront | ⬜ |
 | 6 | Cart & guest checkout | ⬜ |
 | 7 | Shipping configuration | ⬜ |
@@ -29,6 +29,97 @@ phase's scope and done-when criteria.
 
 Phases 0–9 are a complete sellable product. MVP for first paying customers is
 0 → 11.
+
+---
+
+## Phase 3 — Catalog ✅
+
+**Done-when criterion**
+
+> A 3-option product with 12 variants can be created on a phone in under 2 minutes.
+
+✅ Driven end to end in a real Chromium at **390px** against the full local Supabase
+stack:
+
+```
+[0.3s] name, price, weight entered
+[0.8s] three options entered  (Size: S,M,L · Color: Black,White · Sleeve: Short,Long)
+[1.0s] matrix generated -> "12 variants generated"
+[3.5s] bulk price + SKUs applied to all 12
+[5.1s] SAVED AND PUBLISHED
+=== 5.1s     console errors: none     no horizontal overflow
+```
+
+Verified in the database afterwards: 12 variants, 12 distinct SKUs, ₱549 on every
+row, and the combinations ordered `S/Black/Short … L/White/Long` — the last option
+varying fastest, so rows group by size the way a rack does.
+
+What actually buys the 2 minutes is not the generator but the two bulk actions.
+Twelve rows × three fields is 36 entries; "apply this price to all" plus
+"auto-fill SKUs" turns the common case (one price across a size run) into two.
+
+**Delivered**
+
+- Seven tables: `categories`, `products`, `product_options`,
+  `product_option_values`, `product_variants`, `product_images`, `media_assets` —
+  every one with `tenant_id` and RLS, per hard rule 1
+- **Composite foreign keys** so denormalised `tenant_id` cannot disagree with its
+  parent: each parent has `unique (tenant_id, id)` and each child references
+  `(tenant_id, parent_id)`. A cross-tenant child is unrepresentable rather than
+  merely forbidden
+- Variant integrity enforced in the database, not the form: exactly one value per
+  option, values must belong to *this* product, no duplicate combination (order
+  independent — the array is normalised by trigger), compare-at must exceed price,
+  SKU unique per tenant
+- `generateVariantMatrix()` — cartesian product that **keeps prices and SKUs for
+  combinations that survive a regeneration**, so adding one colour does not blank
+  twelve prices
+- `diffVariants()` — so saving never deletes and recreates an untouched variant,
+  which would silently discard the stock phase 4 attaches to it
+- Hand-written CSV import/export: quoted fields, embedded commas, `""` escapes,
+  CRLF, Excel's BOM. Reports per-row errors **and imports the rest** — one bad row
+  must not cost a seller the other 200. Export → edit → re-import round-trips
+- Quick-add form (comma-separated option values, so `S, M, L` is one field),
+  variant grid that is a table from `sm` up and stacked cards on phones
+- Categories seeded from the phase 2 onboarding presets via
+  `seed_categories_from_presets()`, idempotent
+- Public storefront projections (`storefront_products`, `storefront_variants`,
+  `storefront_product_images`) that **exclude `cost_centavos`** — that column is
+  the seller's margin
+- Isolation suite extended to the catalog: **129 assertions**
+
+**Verified by sabotage.** Disabling RLS on `product_variants` fails the suite
+(`Marlon cannot see Rhea's variants — expected 0, got 4`), and adding
+`cost_centavos` to the public view fails it too. Over real HTTP as `anon`:
+`storefront_products` returns the published product, asking for `cost_centavos`
+returns **400**, and all five base tables return **401**.
+
+**The bug worth reading**
+
+The variant grid's price inputs were uncontrolled (`defaultValue`). "Apply to all"
+updated the state and the row badges but left every input showing the old number —
+it saved the correct price and looked completely broken, which is worse than
+failing, because the seller cannot tell which one to believe. Caught by reading a
+screenshot, not by a test. Fixed by making the input controlled while still letting
+the seller type freely (state adjusted from props *during render*, since the
+`react-hooks` rules correctly forbid doing it in an effect), and guarded by
+`variant-grid.test.tsx`.
+
+**Deferred, deliberately**
+
+- **Stock is not in the variant grid**, despite the build spec listing it in this
+  phase. `inventory_levels` is per-location and arrives in phase 4; a `stock` column
+  on a variant would be a second source of truth from the day it shipped. The grid
+  says so inline rather than showing a dead field.
+- **Product images have a schema and a bucket but no upload UI.** The tables and
+  storage policies are done and tested; wiring the picker is a small piece of
+  phase 5, where the storefront actually renders them.
+- `saveProduct()` is a sequence of PostgREST calls, not one transaction — PostgREST
+  cannot express one across requests. A failed save leaves a draft the seller can
+  retry. Phase 4 moves it into an RPC, where inventory makes atomicity genuinely
+  load-bearing.
+- Barcode is stored but not surfaced in the grid; it belongs with the phase 9
+  packing flow that scans it.
 
 ---
 
