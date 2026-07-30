@@ -1,0 +1,114 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Cancel superseded runs on the same ref — no value in finishing a stale commit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: Typecheck · Lint · Test · Build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Test
+        run: pnpm test
+
+      - name: Build
+        run: pnpm build
+
+  migrations:
+    name: Migrations apply to a clean database
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    # The schema is the part hardest to fix after the fact, so every migration is
+    # applied to an empty database on every PR. Uses the same Postgres image
+    # Supabase runs, so the anon/authenticated roles and `extensions` schema that
+    # the RLS policies depend on actually exist.
+    services:
+      postgres:
+        image: supabase/postgres:15.8.1.060
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 54322:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Apply migrations in order
+        env:
+          PGPASSWORD: postgres
+        run: |
+          for file in supabase/migrations/*.sql; do
+            echo "==> $file"
+            psql -h 127.0.0.1 -p 54322 -U postgres -v ON_ERROR_STOP=1 -q -f "$file"
+          done
+
+      - name: Seed PSGC reference data
+        env:
+          SUPABASE_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
+        run: pnpm psgc:seed
+
+      - name: Verify reference data landed
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h 127.0.0.1 -p 54322 -U postgres -v ON_ERROR_STOP=1 -c "
+            do \$\$
+            declare
+              barangays int;
+              cities int;
+            begin
+              select count(*) into barangays from public.psgc_barangays;
+              select count(*) into cities from public.psgc_cities;
+              if barangays < 42000 then
+                raise exception 'Expected >= 42000 barangays, found %', barangays;
+              end if;
+              if cities < 1600 then
+                raise exception 'Expected >= 1600 cities, found %', cities;
+              end if;
+              raise notice 'PSGC OK: % cities, % barangays', cities, barangays;
+            end
+            \$\$;
+          "

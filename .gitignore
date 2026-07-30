@@ -1,0 +1,31 @@
+node_modules
+dist
+dist-ssr
+coverage
+*.local
+
+# Env — never commit real credentials. See .env.example.
+.env
+.env.*
+!.env.example
+
+# Supabase local dev
+supabase/.temp
+supabase/.branches
+
+# Editors / OS
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Build metadata
+.tsbuildinfo
+*.tsbuildinfo
+vite.config.ts.timestamp-*
+vitest.config.ts.timestamp-*
