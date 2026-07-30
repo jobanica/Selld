@@ -104,6 +104,134 @@ export type Database = {
           },
         ]
       }
+      locations: {
+        Row: {
+          barangay_code: string | null
+          city_code: string | null
+          contact_name: string | null
+          contact_phone: string | null
+          created_at: string
+          id: string
+          is_default: boolean
+          landmark: string | null
+          name: string
+          postal_code: string | null
+          province_code: string | null
+          region_code: string | null
+          street: string | null
+          tenant_id: string
+          type: string
+          updated_at: string
+        }
+        Insert: {
+          barangay_code?: string | null
+          city_code?: string | null
+          contact_name?: string | null
+          contact_phone?: string | null
+          created_at?: string
+          id?: string
+          is_default?: boolean
+          landmark?: string | null
+          name: string
+          postal_code?: string | null
+          province_code?: string | null
+          region_code?: string | null
+          street?: string | null
+          tenant_id: string
+          type?: string
+          updated_at?: string
+        }
+        Update: {
+          barangay_code?: string | null
+          city_code?: string | null
+          contact_name?: string | null
+          contact_phone?: string | null
+          created_at?: string
+          id?: string
+          is_default?: boolean
+          landmark?: string | null
+          name?: string
+          postal_code?: string | null
+          province_code?: string | null
+          region_code?: string | null
+          street?: string | null
+          tenant_id?: string
+          type?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "locations_barangay_code_fkey"
+            columns: ["barangay_code"]
+            isOneToOne: false
+            referencedRelation: "psgc_address_units"
+            referencedColumns: ["barangay_code"]
+          },
+          {
+            foreignKeyName: "locations_barangay_code_fkey"
+            columns: ["barangay_code"]
+            isOneToOne: false
+            referencedRelation: "psgc_barangays"
+            referencedColumns: ["code"]
+          },
+          {
+            foreignKeyName: "locations_city_code_fkey"
+            columns: ["city_code"]
+            isOneToOne: false
+            referencedRelation: "psgc_address_units"
+            referencedColumns: ["city_code"]
+          },
+          {
+            foreignKeyName: "locations_city_code_fkey"
+            columns: ["city_code"]
+            isOneToOne: false
+            referencedRelation: "psgc_cities"
+            referencedColumns: ["code"]
+          },
+          {
+            foreignKeyName: "locations_province_code_fkey"
+            columns: ["province_code"]
+            isOneToOne: false
+            referencedRelation: "psgc_address_units"
+            referencedColumns: ["province_code"]
+          },
+          {
+            foreignKeyName: "locations_province_code_fkey"
+            columns: ["province_code"]
+            isOneToOne: false
+            referencedRelation: "psgc_provinces"
+            referencedColumns: ["code"]
+          },
+          {
+            foreignKeyName: "locations_region_code_fkey"
+            columns: ["region_code"]
+            isOneToOne: false
+            referencedRelation: "psgc_address_units"
+            referencedColumns: ["region_code"]
+          },
+          {
+            foreignKeyName: "locations_region_code_fkey"
+            columns: ["region_code"]
+            isOneToOne: false
+            referencedRelation: "psgc_regions"
+            referencedColumns: ["code"]
+          },
+          {
+            foreignKeyName: "locations_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "locations_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       profiles: {
         Row: {
           avatar_path: string | null
@@ -332,6 +460,54 @@ export type Database = {
         }
         Relationships: []
       }
+      storefront_themes: {
+        Row: {
+          colors: Json
+          created_at: string
+          custom_css: string | null
+          fonts: Json
+          hero: Json
+          preset: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          colors?: Json
+          created_at?: string
+          custom_css?: string | null
+          fonts?: Json
+          hero?: Json
+          preset?: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          colors?: Json
+          created_at?: string
+          custom_css?: string | null
+          fonts?: Json
+          hero?: Json
+          preset?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "storefront_themes_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: true
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "storefront_themes_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: true
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tenant_members: {
         Row: {
           accepted_at: string | null
@@ -383,6 +559,42 @@ export type Database = {
             columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      tenant_settings: {
+        Row: {
+          key: string
+          tenant_id: string
+          updated_at: string
+          value: Json
+        }
+        Insert: {
+          key: string
+          tenant_id: string
+          updated_at?: string
+          value: Json
+        }
+        Update: {
+          key?: string
+          tenant_id?: string
+          updated_at?: string
+          value?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "tenant_settings_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "tenant_settings_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
             referencedColumns: ["id"]
           },
         ]
@@ -479,6 +691,33 @@ export type Database = {
         }
         Relationships: []
       }
+      storefront_theme_public: {
+        Row: {
+          colors: Json | null
+          custom_css: string | null
+          fonts: Json | null
+          hero: Json | null
+          preset: string | null
+          slug: string | null
+          tenant_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "storefront_themes_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: true
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "storefront_themes_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: true
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Functions: {
       accept_invitation: {
@@ -546,6 +785,7 @@ export type Database = {
           status: string
         }[]
       }
+      storage_path_tenant_id: { Args: { p_name: string }; Returns: string }
       tenant_role_of: {
         Args: { p_tenant_id: string }
         Returns: Database["public"]["Enums"]["tenant_role"]

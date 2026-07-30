@@ -5,8 +5,8 @@
 Multi-tenant ecommerce + order operations platform for Philippine social sellers.
 Working name: **Selld** (`selld.ph` / `selld.store`).
 
-> **Status: phase 1 (Auth & multi-tenant core) complete.** Next: phase 2, store
-> onboarding wizard. See [`docs/phase-status.md`](docs/phase-status.md).
+> **Status: phase 2 (Store onboarding wizard) complete.** Next: phase 3, catalog.
+> See [`docs/phase-status.md`](docs/phase-status.md).
 
 ---
 
@@ -64,12 +64,13 @@ src/
   app/           ← dashboard (authenticated seller surface)
   storefront/    ← public buyer surface, separate perf budget
   features/      ← feature slices
-    auth/        tenancy/
+    address/  auth/  onboarding/  tenancy/
   lib/           ← money, phone, psgc, i18n, time, supabase, tenant
   components/ui  ← shadcn/ui primitives
 supabase/
   migrations/    ← append-only once pushed
   seed/          ← PSGC reference data (committed, 380 KB gzipped)
+  templates/     ← auth emails (must render {{ .Token }} — see CLAUDE.md)
   tests/         ← SQL suites; the RLS isolation proof lives here
 scripts/         ← PSGC pipeline + SQL test runner
 ```
@@ -107,7 +108,7 @@ naive UTC date splits one Manila morning across two buckets.
 **Tenant isolation is enforced in the database, not the client.** Every
 tenant-scoped policy funnels through `is_tenant_member(tenant_id)`, and
 [`supabase/tests/tenancy-isolation.sql`](supabase/tests/tenancy-isolation.sql)
-proves cross-tenant reads and writes return nothing — 79 assertions, run in CI on
+proves cross-tenant reads and writes return nothing — 105 assertions, run in CI on
 every PR. The suite is verified by sabotage: break RLS and it fails. Read the
 "Writing a tenant-scoped table" section of [`CLAUDE.md`](CLAUDE.md) before adding
 a table.

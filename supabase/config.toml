@@ -244,6 +244,29 @@ otp_expiry = 3600
 # sender_name = "Admin"
 
 # Uncomment to customize email template
+# ---------------------------------------------------------------------------
+# Selld: OTP code emails (NOT magic links)
+# ---------------------------------------------------------------------------
+# Sign-in asks for a 6-digit code, so every email that can start a session must
+# render {{ .Token }}. The Supabase defaults send a link instead, which leaves the
+# seller with nothing to type. All three templates are set because Supabase picks
+# a different one depending on whether the user is new (confirmation), returning
+# (magic_link), or recovering (recovery).
+#
+# These apply to LOCAL DEVELOPMENT ONLY. On Supabase cloud, set the same templates
+# under Authentication -> Emails or production silently reverts to magic links.
+[auth.email.template.magic_link]
+subject = "Your Selld sign-in code"
+content_path = "./supabase/templates/otp-code.html"
+
+[auth.email.template.confirmation]
+subject = "Your Selld sign-in code"
+content_path = "./supabase/templates/otp-code.html"
+
+[auth.email.template.recovery]
+subject = "Your Selld sign-in code"
+content_path = "./supabase/templates/otp-code.html"
+
 # [auth.email.template.invite]
 # subject = "You have been invited"
 # content_path = "./supabase/templates/invite.html"

@@ -1,0 +1,41 @@
+<!--
+  Sign-in code email.
+
+  This template exists because Supabase's default email sends a magic LINK, and
+  Selld's sign-in asks for a 6-digit CODE. Without `{{ .Token }}` here, a seller
+  gets a link, the app asks for a code she does not have, and sign-in is simply
+  broken. Configured via [auth.email.template.*] in supabase/config.toml.
+
+  IMPORTANT: config.toml only applies to local development. On Supabase cloud the
+  same templates must be set under Authentication -> Emails, or production will
+  fall back to magic links. See docs/phase-status.md.
+
+  Bilingual on purpose: we cannot know the seller's chosen locale server-side, and
+  mixed English/Taglish is how Filipino businesses actually write to customers.
+-->
+<div style="font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif; max-width: 480px; margin: 0 auto; padding: 24px; color: #1f2937;">
+  <h2 style="margin: 0 0 8px; font-size: 20px; color: #12604f;">Your Selld sign-in code</h2>
+
+  <p style="margin: 0 0 20px; font-size: 14px; color: #4b5563;">
+    Enter this code to sign in. <em>Ilagay ang code na ito para maka-sign in.</em>
+  </p>
+
+  <p style="margin: 0 0 20px; font-size: 34px; font-weight: 700; letter-spacing: 8px; text-align: center; background: #f3f4f6; border-radius: 10px; padding: 16px 8px; color: #111827;">
+    {{ .Token }}
+  </p>
+
+  <p style="margin: 0 0 8px; font-size: 13px; color: #6b7280;">
+    This code expires shortly and can only be used once.
+    <em>Mag-e-expire agad ito at isang beses lang magagamit.</em>
+  </p>
+
+  <p style="margin: 0; font-size: 13px; color: #6b7280;">
+    If you did not ask for this, you can ignore this email.
+    <em>Kung hindi ka nag-request, huwag na itong pansinin.</em>
+  </p>
+
+  <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0 12px;" />
+  <p style="margin: 0; font-size: 12px; color: #9ca3af;">
+    Selld — the online store built for Filipino social sellers.
+  </p>
+</div>

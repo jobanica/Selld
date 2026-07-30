@@ -727,6 +727,172 @@ end;
 $$;
 
 -- ---------------------------------------------------------------------------
+-- Phase 2 tables — settings, locations, themes
+-- ---------------------------------------------------------------------------
+\echo ''
+\echo '=== Onboarding tables (tenant_settings, locations, storefront_themes)'
+
+reset role;
+set local role authenticated;
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+
+  -- Defaults were seeded by the tenant trigger, not by the wizard.
+  perform tests.eq((select count(*)::int from public.storefront_themes), 1,
+    'Rhea sees exactly one theme row — her own');
+  perform tests.ok((select count(*) from public.tenant_settings) >= 9,
+    'default settings were seeded on tenant creation');
+  perform tests.eq(
+    (select value from public.tenant_settings
+      where tenant_id = i.rhea_tenant and key = 'payments.cod_enabled'),
+    'true'::jsonb, 'COD is enabled by default');
+
+  -- Cross-tenant reads see nothing.
+  perform tests.eq(
+    (select count(*)::int from public.storefront_themes where tenant_id = i.marlon_tenant), 0,
+    'Rhea cannot read Marlon''s theme');
+  perform tests.eq(
+    (select count(*)::int from public.tenant_settings where tenant_id = i.marlon_tenant), 0,
+    'Rhea cannot read Marlon''s settings');
+
+  -- Cross-tenant writes fail.
+  perform tests.eq(
+    tests.affected(format(
+      $q$ update public.storefront_themes set preset = 'bold' where tenant_id = %L $q$,
+      i.marlon_tenant)),
+    0::bigint, 'Rhea cannot restyle Marlon''s storefront');
+  perform tests.rejects(format(
+    $q$ insert into public.tenant_settings (tenant_id, key, value)
+        values (%L, 'payments.cod_enabled', 'false'::jsonb) $q$, i.marlon_tenant),
+    'Rhea cannot write settings into Marlon''s tenant');
+  perform tests.rejects(format(
+    $q$ insert into public.locations (tenant_id, name) values (%L, 'Stolen warehouse') $q$,
+    i.marlon_tenant),
+    'Rhea cannot create a location in Marlon''s tenant');
+
+  -- Her own writes work.
+  insert into public.locations (tenant_id, name, type, is_default, region_code, city_code)
+  values (i.rhea_tenant, 'Home', 'home', true, '110000000', '112402000');
+  perform tests.eq((select count(*)::int from public.locations), 1,
+    'Rhea can create her own location');
+
+  update public.storefront_themes
+    set preset = 'bold', colors = '{"primary":"#12604f"}'::jsonb
+    where tenant_id = i.rhea_tenant;
+  perform tests.eq(
+    (select preset from public.storefront_themes where tenant_id = i.rhea_tenant),
+    'bold', 'Rhea can restyle her own storefront');
+end;
+$$;
+
+-- Theme colours are validated in the database, not just the form.
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+  perform tests.rejects(format(
+    $q$ update public.storefront_themes set colors = '{"primary":"red"}'::jsonb where tenant_id = %L $q$,
+    i.rhea_tenant),
+    'a non-hex theme colour is rejected');
+  perform tests.rejects(format(
+    $q$ update public.storefront_themes set colors = '{"primary":"#GGG"}'::jsonb where tenant_id = %L $q$,
+    i.rhea_tenant),
+    'a malformed hex theme colour is rejected');
+  perform tests.rejects(format(
+    $q$ update public.storefront_themes set colors = '{"primary":123}'::jsonb where tenant_id = %L $q$,
+    i.rhea_tenant),
+    'a non-string theme colour is rejected');
+end;
+$$;
+
+-- Only one default location per tenant, enforced by index rather than by code.
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+  perform tests.rejects(format(
+    $q$ insert into public.locations (tenant_id, name, is_default) values (%L, 'Second default', true) $q$,
+    i.rhea_tenant),
+    'a tenant cannot have two default locations');
+
+  -- A second non-default location is fine.
+  insert into public.locations (tenant_id, name, is_default)
+  values (i.rhea_tenant, 'Consignment shelf', false);
+  perform tests.eq((select count(*)::int from public.locations), 2,
+    'additional non-default locations are allowed');
+end;
+$$;
+
+-- Role enforcement on the phase 2 tables: a packer reads, never writes.
+select tests.login('33333333-3333-3333-3333-333333333333', 'jess@example.ph');
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+  perform tests.eq((select count(*)::int from public.locations), 2,
+    'a packer can read locations (needed to pick and pack)');
+  perform tests.ok((select count(*) from public.tenant_settings) >= 9,
+    'a packer can read settings (COD policy affects packing slips)');
+
+  -- But changing where the business ships from, or its payment policy, is admin work.
+  perform tests.rejects(format(
+    $q$ insert into public.locations (tenant_id, name) values (%L, 'Packer warehouse') $q$,
+    i.rhea_tenant),
+    'a packer cannot create a location');
+  perform tests.eq(
+    tests.affected(format(
+      $q$ update public.locations set name = 'Renamed' where tenant_id = %L $q$, i.rhea_tenant)),
+    0::bigint, 'a packer cannot rename a location');
+  perform tests.eq(
+    tests.affected(format(
+      $q$ update public.tenant_settings set value = 'false'::jsonb
+          where tenant_id = %L and key = 'payments.cod_enabled' $q$, i.rhea_tenant)),
+    0::bigint, 'a packer cannot switch off COD');
+  perform tests.eq(
+    tests.affected(format(
+      $q$ update public.storefront_themes set preset = 'mono' where tenant_id = %L $q$,
+      i.rhea_tenant)),
+    0::bigint, 'a packer cannot restyle the storefront');
+end;
+$$;
+
+-- Anonymous storefront branding.
+reset role;
+set local role anon;
+select tests.logout();
+do $$
+begin
+  perform tests.rejects($q$ select count(*) from public.storefront_themes $q$,
+    'anon has no privilege on storefront_themes');
+  perform tests.rejects($q$ select count(*) from public.tenant_settings $q$,
+    'anon has no privilege on tenant_settings');
+  perform tests.rejects($q$ select count(*) from public.locations $q$,
+    'anon cannot read where a seller lives');
+  perform tests.ok((select count(*) from public.storefront_theme_public) >= 1,
+    'anon CAN read public storefront branding');
+end;
+$$;
+
+do $$
+declare v_columns text[];
+begin
+  select array_agg(column_name order by column_name) into v_columns
+  from information_schema.columns
+  where table_schema = 'public' and table_name = 'storefront_theme_public';
+  perform tests.eq(v_columns,
+    array['colors','custom_css','fonts','hero','preset','slug','tenant_id'],
+    'storefront_theme_public exposes only branding columns');
+end;
+$$;
+
+reset role;
+set local role authenticated;
+
+-- ---------------------------------------------------------------------------
 -- my_tenants()
 -- ---------------------------------------------------------------------------
 \echo ''
@@ -763,8 +929,8 @@ declare v_passed int := coalesce(nullif(current_setting('tests.passed', true), '
 begin
   raise notice '';
   raise notice '=== % assertions passed', v_passed;
-  if v_passed < 60 then
-    raise exception 'Expected at least 60 assertions, only % ran — did a section get skipped?', v_passed
+  if v_passed < 100 then
+    raise exception 'Expected at least 100 assertions, only % ran — did a section get skipped?', v_passed
       using errcode = 'triggered_action_exception';
   end if;
 end;

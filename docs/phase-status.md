@@ -7,8 +7,8 @@ phase's scope and done-when criteria.
 |---:|---|---|
 | 0 | Foundation | ✅ Complete |
 | 1 | Auth & multi-tenant core | ✅ Complete |
-| 2 | Store onboarding wizard | ⬜ Next |
-| 3 | Catalog | ⬜ |
+| 2 | Store onboarding wizard | ✅ Complete |
+| 3 | Catalog | ⬜ Next |
 | 4 | Inventory | ⬜ |
 | 5 | Storefront | ⬜ |
 | 6 | Cart & guest checkout | ⬜ |
@@ -29,6 +29,100 @@ phase's scope and done-when criteria.
 
 Phases 0–9 are a complete sellable product. MVP for first paying customers is
 0 → 11.
+
+---
+
+## Phase 2 — Store onboarding wizard ✅
+
+**Done-when criterion**
+
+> A new signup reaches a live (empty) storefront in under 3 minutes.
+
+✅ Verified end to end against the **full local Supabase stack** (Postgres 17.6,
+GoTrue, PostgREST, Storage, Mailpit) driving a real Chromium at 390px:
+
+```
+[1.0s] sign-in page
+[1.5s] code requested
+[1.5s] OTP retrieved from email: 182767
+[1.8s] signed in -> create store        slug suggested: rheas-finds
+[2.2s] wizard step 1 (identity)
+[2.4s] wizard step 2 (branding)
+[2.7s] wizard step 3 (presets)
+[2.9s] wizard step 4 (shipping origin)  Davao City barangays loaded: 182
+[3.4s] wizard step 5 (payments)
+[3.6s] DASHBOARD REACHED
+=== total elapsed: 3.7s     console errors: none
+```
+
+That 3.7s is machine time, not a claim about a human — it is the *system* cost of
+the path. What it establishes is that nothing in the flow blocks, retries, or
+round-trips more than it needs to, so the 3-minute budget is spent on the seller
+thinking rather than on the software.
+
+Persisted state was then checked in the database: `₱30` typed into the COD field
+stored as `3000` centavos, `0917 123 4567` normalised to `+639171234567`, presets
+saved as `["skincare","rtw"]`, and the origin resolved through PSGC to
+`Buhangin (Pob.), Davao City, Davao Del Sur`.
+
+**Honest scope note:** the storefront *page* is phase 5. What phase 2 delivers is
+a signup that ends with a fully configured store whose subdomain resolves and
+whose branding is readable anonymously — verified over real HTTP:
+
+| Request as `anon` | Result |
+|---|---|
+| `storefront_tenants?slug=eq.…` | 200, returns name/slug/brand colour |
+| `storefront_theme_public?slug=eq.…` | 200, returns preset/colours |
+| `tenants` | **401** |
+| `tenant_settings` | **401** |
+| `locations` (the seller's home address) | **401** |
+| `psgc_regions` | 200 (public reference data) |
+
+**Delivered**
+
+- Three tables: `tenant_settings` (key/value), `locations` (PSGC-coded, one
+  default per tenant enforced by partial unique index), `storefront_themes`
+- A trigger seeds a theme row and 9 default settings on **tenant creation**, not
+  in the wizard — an abandoned wizard still leaves a coherent tenant
+- Theme colours validated in the database: a non-hex value is rejected by trigger,
+  not just by the form
+- Public `tenant-public` storage bucket, with the tenant-id path prefix as the
+  authorisation boundary
+- `PhAddressPicker` — the reusable region → province → city → barangay cascade,
+  which phase 6 checkout will use unchanged
+- The 5-step wizard, resumable: each step saves and `onboarding.step` records
+  progress
+- 12 category presets written from what PH social sellers actually sell
+- Client-side image downscaling before logo upload (512px max edge)
+- Isolation suite extended to the new tables: **105 assertions**, and now also
+  verified on Postgres 17.6 as well as the 15.8 CI image
+
+**The finding worth reading**
+
+Email OTP silently did not work. `signInWithOtp({ email })` sends Supabase's
+default template, which is a magic **link** — so the seller received a link while
+the app asked for a 6-digit **code** she never got. Nothing errored; sign-in was
+simply impossible. Fixed by adding `supabase/templates/otp-code.html` (which
+renders `{{ .Token }}`) and wiring it to the `magic_link`, `confirmation` and
+`recovery` templates in `config.toml`.
+
+> ⚠️ **`config.toml` is local-only.** On Supabase cloud the same three templates
+> must be set under **Authentication → Emails**, or production reverts to magic
+> links and email sign-in breaks again. This is a deployment checklist item, not a
+> code change.
+
+**Deferred, deliberately**
+
+- **Xendit is not connected.** Step 5 shows online payment as an inert,
+  clearly-labelled placeholder rather than a toggle that would fail at checkout.
+  Phase 8 owns it. COD is fully functional.
+- Phone OTP still needs the Semaphore send-SMS hook (phase 11) — unchanged from
+  phase 1.
+- Category presets are stored only; phase 3 creates the actual `categories` rows
+  from them via `categoriesForPresets()`.
+- Barangay names keep the PSA `(Pob.)` suffix — e.g. `Buhangin (Pob.)`. Left
+  verbatim because courier portals show the same form, so a seller comparing the
+  two sees a match.
 
 ---
 

@@ -5,7 +5,7 @@ Build one phase per session, in order. The full roadmap is in
 [`docs/build-spec.md`](docs/build-spec.md); who we're building for is in
 [`docs/avatar.md`](docs/avatar.md).
 
-**Current state: phase 1 complete.** Next up is phase 2 (store onboarding wizard).
+**Current state: phase 2 complete.** Next up is phase 3 (catalog).
 
 ---
 
@@ -111,7 +111,7 @@ src/
   app/          ← dashboard (authenticated seller surface)
   storefront/   ← public buyer surface, own perf budget
   features/     ← feature slices; may import from core and lib
-    auth/ tenancy/
+    address/ auth/ onboarding/ tenancy/
   lib/          ← money, phone, psgc, i18n, time, supabase, tenant
   components/ui ← shadcn/ui primitives
 ```
@@ -154,6 +154,20 @@ one new file plus one registry line, and zero lines of order logic.
 - **`react-hooks` v7 lint rules are strict.** No `setState` in an effect body —
   drive state from the event instead. `useState` (not `useMemo`) for anything that
   must be referentially stable, like the QueryClient.
+- **Auth emails must render `{{ .Token }}`.** Supabase's default templates send a
+  magic *link*; Selld's sign-in asks for a *code*. `supabase/config.toml` points
+  `magic_link`, `confirmation` and `recovery` at `supabase/templates/otp-code.html`
+  — but **config.toml is local only**. On Supabase cloud the same three templates
+  must be set under Authentication → Emails or email sign-in silently breaks.
+- **New `tenant_settings` keys go in `src/lib/settings/keys.ts` first.** The table
+  is key/value, so nothing in the database stops a typo'd key; that file is the
+  compensating control, and its parsers make a malformed value fall back to a
+  default rather than reach pricing logic as `NaN`.
+- **Never require a province.** NCR and 3 independent cities have none. Use
+  `isAddressComplete()` and `PhAddressPicker`, which handle it.
+- **`t()` keys must stay literal types.** A `Record<number, \`onboarding.${string}\`>`
+  lookup compiles but loses key checking; use `as const` arrays/objects so the
+  literal survives.
 
 ## Package manager
 
