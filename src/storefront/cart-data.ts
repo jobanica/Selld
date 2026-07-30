@@ -18,6 +18,8 @@ export interface CartLine {
   variantLabel: string | null
   sku: string | null
   qty: number
+  /** Whether this product may be paid cash on delivery. */
+  codAllowed?: boolean
   /** Live price, read from the database. What the buyer will actually pay. */
   unitPrice: number
   lineTotal: number
@@ -37,15 +39,38 @@ export interface CartLine {
  * that eventually disagrees with itself, and the version the buyer saw is the one
  * they will argue about.
  */
+export interface ShippingQuote {
+  zoneId: string | null
+  zoneName: string | null
+  rateName: string | null
+  rateType: 'flat' | 'weight_tiered' | 'courier_live'
+  amount: number
+  freeApplied: boolean
+  freeOver?: number | null
+  /** `zone`, `zone_without_rate`, or `setting_fallback`. */
+  source: string
+}
+
 export interface CartQuote {
   cartId: string
   paymentMethod: string
   itemCount: number
   items: CartLine[]
   subtotal: number
+  weightGrams?: number
   discountTotal: number
   shippingTotal: number
+  /** Which zone and rate produced `shippingTotal`. */
+  shipping?: ShippingQuote
+  /**
+   * True when no destination was known, so `shippingTotal` is the catch-all zone's
+   * price. The cart page must say so — a number that changes at checkout without
+   * explanation is how a buyer decides the store is dishonest.
+   */
+  shippingEstimated?: boolean
   codFee: number
+  /** False when any line's product blocks cash on delivery. */
+  codAllowed?: boolean
   grandTotal: number
 }
 

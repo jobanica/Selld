@@ -88,4 +88,35 @@ describe('describeStockError()', () => {
       'insufficient_stock',
     )
   })
+
+  /**
+   * The shape that actually arrives, and the reason every case above passed while
+   * the browser showed a generic retry prompt for a real oversell.
+   *
+   * `reserve_stock` is called through `client.rpc(...)`, and on that path
+   * postgrest-js does `error = JSON.parse(body)` — a plain object, not its
+   * `PostgrestError` class (which it only builds under `.throwOnError()`). Every
+   * assertion above constructs `new Error(...)` and so never exercised the guard
+   * that was rejecting the real thing. Keep this case: it is the only one here that
+   * fails if an `instanceof Error` check comes back.
+   */
+  it('reads the message off a PostgREST rejection, which is a plain object', () => {
+    expect(
+      describeStockError({
+        message: 'Insufficient stock for variant abc (requested 3)',
+        code: 'P0001',
+        details: null,
+        hint: null,
+      }),
+    ).toBe('insufficient_stock')
+
+    expect(
+      describeStockError({
+        message: 'permission denied for table inventory_levels',
+        code: '42501',
+        details: null,
+        hint: 'Grant the required privileges to the current role with: GRANT …',
+      }),
+    ).toBe('not_allowed')
+  })
 })

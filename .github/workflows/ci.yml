@@ -223,6 +223,42 @@ jobs:
             \$\$;
           "
 
+      # The shipping zone layout is the seller's commercial arrangement — which
+      # places they serve and what they charge. A buyer gets one resolved number
+      # through the cart functions and nothing else. The tenancy suite asserts this
+      # too; repeating it here means a stray `grant ... to anon` in a future
+      # migration fails the build even if someone edits the suite.
+      - name: Shipping configuration is not reachable by anon
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h 127.0.0.1 -p 54322 -U postgres -v ON_ERROR_STOP=1 -c "
+            set role anon;
+            do \$\$
+            declare t text;
+            begin
+              foreach t in array array['shipping_zones', 'shipping_zone_areas',
+                                       'shipping_rates', 'shipping_weight_tiers']
+              loop
+                begin
+                  execute format('select count(*) from public.%I', t);
+                  raise exception 'anon must not be able to read public.%', t;
+                exception when insufficient_privilege then null;
+                end;
+              end loop;
+
+              begin
+                perform public.quote_shipping(
+                  gen_random_uuid(), '110000000', '112400000', '112402000', 50000, 500);
+                raise exception 'anon must not be able to price an arbitrary address';
+              exception when insufficient_privilege then null;
+              end;
+
+              raise notice 'shipping configuration is seller-only OK';
+            end
+            \$\$;
+          "
+
       # Guard against the checked-in types drifting from the migrations. If this
       # fails, someone forgot `pnpm db:types` and the client types are lying.
       - name: database.types.ts matches the migrations

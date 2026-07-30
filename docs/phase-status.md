@@ -664,3 +664,115 @@ when the rule is broken.
 **Gate:** `pnpm verify` (336 tests), `pnpm db:test` (225 assertions),
 `pnpm db:test:concurrency` (23 assertions). All 11 migrations apply from scratch on
 PG 17.6.
+
+---
+
+## Phase 7 — Shipping configuration
+
+**Done when:** a seller can express "₱80 Davao City, ₱150 Mindanao, ₱200 rest of PH,
+free over ₱2,000" without touching code.
+
+**Measured** by typing exactly that configuration into `/shipping` in Chromium at
+390×844 @2×, against a real database, and then reading it back off the page:
+
+```
+Davao City   1 area  · ₱80.00  · free over ₱2,000.00   [Davao City]
+Mindanao     6 areas · ₱150.00 · free over ₱2,000.00   [Zamboanga Peninsula,
+                                                        Northern Mindanao,
+                                                        Davao Region, SOCCSKSARGEN,
+                                                        Caraga, BARMM]
+Rest of PH   FALLBACK  Covers everywhere else · ₱200.00 · free over ₱2,000.00
+```
+
+| | Result | Budget |
+|---|---:|---:|
+| Lines of code changed to express it | **0** | 0 |
+| Horizontal overflow at 390px | 0 px | 0 |
+| Touch targets under 44px (phase-7 controls) | 0 | 0 |
+| Console errors | none¹ | none |
+
+¹ One 409 is logged, from the deliberate duplicate-area attempt in step 6.
+
+The zones are listed in **resolution order** — most specific first, catch-all last —
+so the list reads as the sentence the seller was trying to write.
+
+### What shipped
+
+- **`shipping_zones` / `shipping_zone_areas` / `shipping_rates` /
+  `shipping_weight_tiers`**, all tenant-scoped with RLS. Zones are member-readable
+  and admin-writable: a packer needs to know what shipping costs to print a label,
+  but deciding what it costs is a different job.
+- **`resolve_shipping_zone()`** — most specific match wins: city (3) > province (2)
+  > region (1) > catch-all (0), with `sort_order` only as a tiebreak between equally
+  specific zones.
+- **`quote_shipping()`** returns a jsonb document, not a bare amount, so checkout can
+  say *which* rate applied and whether free shipping kicked in. "₱200" with no
+  explanation is what makes a buyer abandon.
+- **Rate types** `flat`, `weight_tiered` and `courier_live`. `free_over_centavos` is
+  a modifier on whichever type is chosen rather than a fourth type — "₱200 rest of
+  PH, free over ₱2,000" is one rule, and splitting it into two rates that must agree
+  is how they stop agreeing.
+- **Weight bands** with `up_to_grams IS NULL` as the open-ended top band, so a 40kg
+  parcel is priced rather than falling off the end. A partial unique index allows
+  only one open band per rate.
+- **`seed_shipping_presets()`** — the Metro Manila / provincial split, which is the
+  fastest path from nothing to a store that can quote anywhere in the country.
+- **COD fee** computed as flat + basis points of subtotal
+  (`payments.cod_fee_centavos` + `payments.cod_fee_bps`), and the **per-product COD
+  block** (`products.is_cod_allowed`, a column since phase 3) now actually enforced:
+  `cart_pricing` reports `codAllowed: false` when any line blocks it and
+  `checkout_place_order` refuses the order, rather than the storefront merely hiding
+  the option. Verified by placing a COD order containing a blocked item and watching
+  it be rejected.
+- **`cart_pricing()` grew an address parameter.** The cart page has no address yet,
+  so it passes nulls, gets the catch-all zone's price, and labels it
+  `shippingEstimated: true`. Verified end to end: the cart shows ₱200 as an estimate
+  while checkout and the written order both charge the resolved ₱80.
+
+### Deviation from the spec
+
+The brief specified `match_rules JSONB` on a zone. Zone areas are instead rows with
+real foreign keys into PSGC, one column per level plus a CHECK that the level agrees
+with the populated column. The reason is phase 6's bug: a JSONB address snapshot has
+no foreign keys, and "non-empty" accepted a region code posted into the city field.
+The same mistake in a zone rule would not error — it would silently never match, and
+the seller would find out from a buyer who was overcharged. Now a stale or bogus code
+is rejected at write time, and the UI turns that into "That place is not in the PSGC
+list any more."
+
+### Notable findings
+
+| Symptom | Cause |
+|---|---|
+| Every shipping write failure read "Could not save that. Please try again." | `describeShippingError` guarded on `error instanceof Error`, but PostgREST returns a **plain object** unless `.throwOnError()` is used. All eight cases fell through to the fallback, telling the seller to retry something that could never succeed. `describeStockError` had the identical bug since phase 4, hiding the oversell message during a live rush. Both now use `errorMessage()`. |
+| Ten resolver assertions passed against a sabotaged resolver | The SQL fixture numbered `sort_order` 0/1/2 in specificity order, so `order by sort_order` alone gave the same answers. The fixture now numbers them backwards; deleting the specificity tiebreak fails four assertions. |
+| The zone list led with the catch-all, under a heading promising resolution order | `sort_order` defaults to 0 for every zone the UI creates, so PostgREST returned them in creation order. A seller reading top-to-bottom would conclude the fallback is what applies. Now sorted by `byResolutionOrder`. |
+| `cart_pricing(uuid, text)` became ambiguous at runtime | `create or replace function` with *added* defaulted parameters creates an overload rather than replacing. The migration reported success while every existing caller failed. Fixed with an explicit `drop function` first. |
+| Re-applying the migration silently skipped every function | `psql -v ON_ERROR_STOP=1` aborted at "relation already exists", and a `grep -v "already exists"` filter hid it. |
+| Edit/Done at 36px, remove-area X at 24px | `size="sm"` is 36px and `button-variants.ts` reserves it for dense table rows; these are one-handed controls. Now 44px. |
+
+### Deliberately deferred
+
+- **`courier_live` charges the rate's fallback amount** and says so on the screen.
+  A real quote needs a booked courier account, which is phase 10.
+- **Weight bands have no editor yet** — the schema, the resolver and the read-back
+  display are all there, and `seed_shipping_presets` can write them, but adding a
+  band from the UI is not wired. Flat and free-over cover the done-when sentence.
+- **Zone reordering** is not exposed. `sort_order` exists and is respected; nothing
+  in the UI sets it, and resolution no longer depends on it.
+- **The percentage COD fee has no editor.** `payments.cod_fee_bps` is read by
+  `cart_pricing` and charged correctly, but only the flat fee is editable (in the
+  onboarding payments step). Phase 8 owns the payments settings screen and is where
+  both belong.
+
+### Still needed outside the repo
+
+- The three OTP email templates (`magic_link`, `confirmation`, `recovery`) must be
+  set in the Supabase **cloud** dashboard under Authentication → Emails.
+  `supabase/config.toml` is local-only, and email sign-in silently breaks without
+  them.
+- The storefront needs a Node process, not just static hosting.
+
+**Gate:** `pnpm verify` (349 tests), `pnpm db:test` (266 assertions),
+`pnpm db:test:concurrency` (23 assertions). All 12 migrations apply from scratch on
+PG 17.6.

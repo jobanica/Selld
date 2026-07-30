@@ -5,7 +5,7 @@ Build one phase per session, in order. The full roadmap is in
 [`docs/build-spec.md`](docs/build-spec.md); who we're building for is in
 [`docs/avatar.md`](docs/avatar.md).
 
-**Current state: phase 6 complete.** Next up is phase 7 (shipping configuration).
+**Current state: phase 7 complete.** Next up is phase 8 (payments).
 
 ---
 
@@ -328,6 +328,30 @@ one new file plus one registry line, and zero lines of order logic.
 - **`t()` keys must stay literal types.** A `Record<number, \`onboarding.${string}\`>`
   lookup compiles but loses key checking; use `as const` arrays/objects so the
   literal survives.
+- **A PostgREST error is not an `Error`.** On the ordinary
+  `const { error } = await client.from(…)` path, postgrest-js does
+  `error = JSON.parse(body)` and returns a **plain object** — it only constructs its
+  `PostgrestError` class (which does extend `Error`) under `.throwOnError()`. So
+  `if (!(error instanceof Error)) return fallback` in front of a message matcher
+  returns the fallback for *every* database failure. Nothing crashes: the seller
+  just gets "please try again" for a duplicate they have to go and remove, forever.
+  Use `errorMessage()` from `src/lib/supabase/errors.ts`. This shipped twice — in
+  `describeStockError` and `describeShippingError` — because a test that builds
+  `new Error(realMessage)` passes happily. Model the error as a plain object.
+- **Never run `prettier` on this repo.** There is no prettier config and no prettier
+  dependency; style is convention (no semicolons, single quotes) and eslint does not
+  enforce either. `npx prettier --write` silently reformats a file to prettier's
+  defaults and eslint reports nothing wrong.
+- **A fixture must not encode the answer it is checking.** The phase-7 zone fixture
+  numbered `sort_order` 0/1/2 in specificity order, so `order by sort_order` alone
+  produced the right zone and all ten resolver assertions passed against a resolver
+  with the specificity tiebreak deleted. It now numbers them backwards on purpose.
+  Same lesson as the phase-6 hard-rule-6 assertion: after writing a test, break the
+  thing it guards and watch it fail.
+- **`pnpm db:test` does not apply migrations.** It runs the SQL suites against
+  whatever is already in the database, so editing a migration and re-running the
+  tests proves nothing about the edit. Sabotage a function with
+  `create or replace` over the live database, or `pnpm db:reset` first.
 
 ## Package manager
 

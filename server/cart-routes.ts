@@ -112,6 +112,33 @@ export async function fetchQuote(
   })
 }
 
+/**
+ * The quote for a known destination.
+ *
+ * Used by the checkout page as soon as the buyer has picked a city, so the shipping
+ * line stops being the catch-all estimate the cart page showed. It calls the same
+ * `cart_pricing` the order will, with the same arguments — which is what keeps the
+ * number on screen and the number charged identical. Falls back to the
+ * address-less quote while the cascade is still incomplete.
+ */
+export async function fetchQuoteForAddress(
+  supabase: SupabaseConfig,
+  token: string | null,
+  address: Partial<CheckoutAddress>,
+  paymentMethod = 'cod',
+): Promise<CartQuote | null> {
+  if (token === null) return null
+  if ((address.cityCode ?? '') === '') return fetchQuote(supabase, token, paymentMethod)
+
+  return rpc<CartQuote | null>(supabase, 'cart_quote_for_address', {
+    p_token: token,
+    p_region_code: address.regionCode ?? null,
+    p_province_code: (address.provinceCode ?? '') === '' ? null : address.provinceCode,
+    p_city_code: address.cityCode,
+    p_payment_method: paymentMethod,
+  })
+}
+
 export async function fetchReceipt(
   supabase: SupabaseConfig,
   token: string | null,
@@ -199,11 +226,11 @@ export async function handleCartQty(
 /**
  * `POST /checkout` — two intents on one route.
  *
- * `refresh` re-renders the form with the next address level populated. That exists
- * for the no-JavaScript path: a `<select>` cannot fetch on its own, so the buyer
- * taps a visible button and the server sends back a form with cities in it. With
- * JavaScript, the same options come from `/api/psgc` without a round trip, and this
- * intent is never used.
+ * `refresh` re-renders the form with the next address level populated. Without
+ * JavaScript a `<select>` cannot submit on its own, so the buyer taps a visible
+ * button; once hydrated the select calls `requestSubmit` with that same button. Both
+ * paths take this identical round trip — the trigger is enhanced, not the fetch, so
+ * there is one code path to be correct.
  *
  * `place` is the real thing.
  *

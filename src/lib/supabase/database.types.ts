@@ -1549,6 +1549,261 @@ export type Database = {
         }
         Relationships: []
       }
+      shipping_rates: {
+        Row: {
+          created_at: string
+          flat_centavos: number | null
+          free_over_centavos: number | null
+          id: string
+          is_active: boolean
+          name: string
+          rate_type: string
+          sort_order: number
+          tenant_id: string
+          updated_at: string
+          zone_id: string
+        }
+        Insert: {
+          created_at?: string
+          flat_centavos?: number | null
+          free_over_centavos?: number | null
+          id?: string
+          is_active?: boolean
+          name: string
+          rate_type: string
+          sort_order?: number
+          tenant_id: string
+          updated_at?: string
+          zone_id: string
+        }
+        Update: {
+          created_at?: string
+          flat_centavos?: number | null
+          free_over_centavos?: number | null
+          id?: string
+          is_active?: boolean
+          name?: string
+          rate_type?: string
+          sort_order?: number
+          tenant_id?: string
+          updated_at?: string
+          zone_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shipping_rates_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shipping_rates_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shipping_rates_tenant_id_zone_id_fkey"
+            columns: ["tenant_id", "zone_id"]
+            isOneToOne: false
+            referencedRelation: "shipping_zones"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
+      shipping_weight_tiers: {
+        Row: {
+          created_at: string
+          id: string
+          price_centavos: number
+          rate_id: string
+          tenant_id: string
+          up_to_grams: number | null
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          price_centavos: number
+          rate_id: string
+          tenant_id: string
+          up_to_grams?: number | null
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          price_centavos?: number
+          rate_id?: string
+          tenant_id?: string
+          up_to_grams?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shipping_weight_tiers_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shipping_weight_tiers_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shipping_weight_tiers_tenant_id_rate_id_fkey"
+            columns: ["tenant_id", "rate_id"]
+            isOneToOne: false
+            referencedRelation: "shipping_rates"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
+      shipping_zone_areas: {
+        Row: {
+          city_code: string | null
+          created_at: string
+          id: string
+          level: string
+          province_code: string | null
+          region_code: string | null
+          tenant_id: string
+          zone_id: string
+        }
+        Insert: {
+          city_code?: string | null
+          created_at?: string
+          id?: string
+          level: string
+          province_code?: string | null
+          region_code?: string | null
+          tenant_id: string
+          zone_id: string
+        }
+        Update: {
+          city_code?: string | null
+          created_at?: string
+          id?: string
+          level?: string
+          province_code?: string | null
+          region_code?: string | null
+          tenant_id?: string
+          zone_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shipping_zone_areas_city_code_fkey"
+            columns: ["city_code"]
+            isOneToOne: false
+            referencedRelation: "psgc_address_units"
+            referencedColumns: ["city_code"]
+          },
+          {
+            foreignKeyName: "shipping_zone_areas_city_code_fkey"
+            columns: ["city_code"]
+            isOneToOne: false
+            referencedRelation: "psgc_cities"
+            referencedColumns: ["code"]
+          },
+          {
+            foreignKeyName: "shipping_zone_areas_province_code_fkey"
+            columns: ["province_code"]
+            isOneToOne: false
+            referencedRelation: "psgc_address_units"
+            referencedColumns: ["province_code"]
+          },
+          {
+            foreignKeyName: "shipping_zone_areas_province_code_fkey"
+            columns: ["province_code"]
+            isOneToOne: false
+            referencedRelation: "psgc_provinces"
+            referencedColumns: ["code"]
+          },
+          {
+            foreignKeyName: "shipping_zone_areas_region_code_fkey"
+            columns: ["region_code"]
+            isOneToOne: false
+            referencedRelation: "psgc_address_units"
+            referencedColumns: ["region_code"]
+          },
+          {
+            foreignKeyName: "shipping_zone_areas_region_code_fkey"
+            columns: ["region_code"]
+            isOneToOne: false
+            referencedRelation: "psgc_regions"
+            referencedColumns: ["code"]
+          },
+          {
+            foreignKeyName: "shipping_zone_areas_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shipping_zone_areas_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shipping_zone_areas_tenant_id_zone_id_fkey"
+            columns: ["tenant_id", "zone_id"]
+            isOneToOne: false
+            referencedRelation: "shipping_zones"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
+      shipping_zones: {
+        Row: {
+          created_at: string
+          id: string
+          is_default: boolean
+          name: string
+          sort_order: number
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          is_default?: boolean
+          name: string
+          sort_order?: number
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          is_default?: boolean
+          name?: string
+          sort_order?: number
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shipping_zones_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shipping_zones_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sms_logs: {
         Row: {
           body: string
@@ -2276,7 +2531,23 @@ export type Database = {
       }
       cart_id_for_token: { Args: { p_token: string }; Returns: string }
       cart_pricing: {
-        Args: { p_cart_id: string; p_payment_method?: string }
+        Args: {
+          p_cart_id: string
+          p_city_code?: string
+          p_payment_method?: string
+          p_province_code?: string
+          p_region_code?: string
+        }
+        Returns: Json
+      }
+      cart_quote_for_address: {
+        Args: {
+          p_city_code: string
+          p_payment_method?: string
+          p_province_code: string
+          p_region_code: string
+          p_token: string
+        }
         Returns: Json
       }
       cart_set_qty: {
@@ -2350,6 +2621,17 @@ export type Database = {
       next_order_number: { Args: { p_tenant_id: string }; Returns: string }
       order_receipt: { Args: { p_order_id: string }; Returns: Json }
       order_receipt_for_token: { Args: { p_token: string }; Returns: Json }
+      quote_shipping: {
+        Args: {
+          p_city_code: string
+          p_province_code: string
+          p_region_code: string
+          p_subtotal: number
+          p_tenant_id: string
+          p_weight_grams?: number
+        }
+        Returns: Json
+      }
       record_order_sms: {
         Args: {
           p_body: string
@@ -2390,8 +2672,26 @@ export type Database = {
         }
         Returns: undefined
       }
+      resolve_shipping_zone: {
+        Args: {
+          p_city_code: string
+          p_province_code: string
+          p_region_code: string
+          p_tenant_id: string
+        }
+        Returns: string
+      }
       seed_categories_from_presets: {
         Args: { p_names: string[]; p_tenant_id: string }
+        Returns: number
+      }
+      seed_shipping_presets: {
+        Args: {
+          p_free_over?: number
+          p_metro_centavos?: number
+          p_rest_centavos?: number
+          p_tenant_id: string
+        }
         Returns: number
       }
       set_stock_level: {

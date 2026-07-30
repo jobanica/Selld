@@ -167,14 +167,33 @@ export function CheckoutPage({
             <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
               {t('checkout.shippingHeading')}
             </h2>
-            <div className="flex items-baseline justify-between rounded-lg border p-3 text-sm">
-              <span>{t('checkout.standardShipping')}</span>
-              <span className="font-semibold">
+            <div className="flex items-baseline justify-between gap-3 rounded-lg border p-3 text-sm">
+              <span className="min-w-0">
+                {/* The zone's own name, because "Standard delivery" tells a buyer in
+                    Davao nothing about why they are paying ₱80 and not ₱200. */}
+                <span className="block">
+                  {quote.shipping?.rateName ?? t('checkout.standardShipping')}
+                </span>
+                {quote.shipping?.zoneName !== null && quote.shipping?.zoneName !== undefined && (
+                  <span className="block text-xs text-muted-foreground">
+                    {quote.shipping.zoneName}
+                  </span>
+                )}
+                {quote.shippingEstimated === true && (
+                  <span className="block text-xs text-muted-foreground">
+                    {t('checkout.shippingPendingAddress')}
+                  </span>
+                )}
+              </span>
+              <span className="shrink-0 font-semibold">
                 {quote.shippingTotal === 0
                   ? t('cart.free')
                   : formatPHP(money(quote.shippingTotal))}
               </span>
             </div>
+            {quote.shipping?.freeApplied === true && (
+              <p className="text-xs text-success">{t('checkout.freeShippingApplied')}</p>
+            )}
           </section>
 
           {/* 4 — Payment */}
@@ -188,19 +207,34 @@ export function CheckoutPage({
               server refuses any method other than `cod` regardless of what the
               form posts.
             */}
-            <label className="flex items-start gap-3 rounded-lg border border-primary bg-primary/5 p-3">
-              <input
-                type="radio"
-                name="paymentMethod"
-                value="cod"
-                defaultChecked
-                className="mt-0.5 size-4 accent-[var(--primary)]"
-              />
-              <span className="text-sm">
-                <span className="block font-medium">{t('checkout.cod')}</span>
-                <span className="block text-muted-foreground">{t('checkout.codHint')}</span>
-              </span>
-            </label>
+            {/*
+              A COD-blocked item makes this store's only live payment method
+              unavailable, so say that rather than showing a control that will be
+              refused. `checkout_place_order` refuses it regardless of what the form
+              posts — this is the explanation, not the enforcement.
+            */}
+            {quote.codAllowed === false ? (
+              <p
+                role="alert"
+                className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm"
+              >
+                {t('checkout.codBlockedItem')}
+              </p>
+            ) : (
+              <label className="flex items-start gap-3 rounded-lg border border-primary bg-primary/5 p-3">
+                <input
+                  type="radio"
+                  name="paymentMethod"
+                  value="cod"
+                  defaultChecked
+                  className="mt-0.5 size-4 accent-[var(--primary)]"
+                />
+                <span className="text-sm">
+                  <span className="block font-medium">{t('checkout.cod')}</span>
+                  <span className="block text-muted-foreground">{t('checkout.codHint')}</span>
+                </span>
+              </label>
+            )}
             <p className="text-xs text-muted-foreground">{t('checkout.onlineSoon')}</p>
           </section>
 

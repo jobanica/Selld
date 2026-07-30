@@ -5,7 +5,7 @@
 Multi-tenant ecommerce + order operations platform for Philippine social sellers.
 Working name: **Selld** (`selld.ph` / `selld.store`).
 
-> **Status: phase 6 (Cart & guest checkout) complete.** Next: phase 7, shipping configuration.
+> **Status: phase 7 (Shipping configuration) complete.** Next: phase 8, payments.
 > See [`docs/phase-status.md`](docs/phase-status.md).
 
 ---

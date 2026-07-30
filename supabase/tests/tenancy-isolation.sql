@@ -1737,6 +1737,386 @@ $$;
 select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
 
 -- ---------------------------------------------------------------------------
+-- Phase 7: shipping zones, rates and the resolver
+-- ---------------------------------------------------------------------------
+-- Two things are being defended here, and they fail in different ways.
+--
+-- The first is ordinary tenancy: a zone layout is a seller's commercial
+-- arrangement — which places they will ship to and for how much — so it is
+-- member-readable, admin-writable, and invisible across tenants.
+--
+-- The second is *resolution correctness*, which is not a security property but is
+-- the thing the phase exists for. `resolve_shipping_zone` picks the most specific
+-- match, and if that ordering breaks, nothing errors: every buyer in Davao City is
+-- quietly charged the Mindanao rate instead of the city rate the seller set. So
+-- the specificity ladder is asserted here rather than left to the UI.
+\echo ''
+\echo '=== Phase 7: shipping'
+
+reset role;
+
+-- The fixture: exactly the sentence in the phase's done-when, expressed as data.
+--   Davao City   -> P80    (city,     specificity 3)
+--   Mindanao     -> P150   (region,   specificity 1) — Davao Region is one of them
+--   Rest of PH   -> P200   (fallback, specificity 0), free over P2,000
+-- Davao City sits *inside* Davao Region on purpose: that overlap is what the
+-- ordering has to resolve, and a fixture without it would pass either way.
+--
+-- `sort_order` runs *backwards* on purpose, and this is load-bearing. It is only a
+-- tiebreak between equally specific zones, so the fixture makes it disagree with
+-- specificity: the catch-all sorts first and the city zone last. An earlier version
+-- numbered them 0/1/2 in specificity order, which meant `order by sort_order` alone
+-- produced the same answers — every assertion below passed against a resolver with
+-- the specificity tiebreak deleted. Sabotaging the resolver now fails four of them.
+do $$
+declare
+  i record;
+  v_davao_zone uuid;
+  v_mindanao_zone uuid;
+  v_rest_zone uuid;
+begin
+  select * into i from tests.ids;
+
+  insert into public.shipping_zones (tenant_id, name, is_default, sort_order)
+  values (i.rhea_tenant, 'Davao City', false, 9) returning id into v_davao_zone;
+  insert into public.shipping_zones (tenant_id, name, is_default, sort_order)
+  values (i.rhea_tenant, 'Mindanao', false, 5) returning id into v_mindanao_zone;
+  insert into public.shipping_zones (tenant_id, name, is_default, sort_order)
+  values (i.rhea_tenant, 'Rest of PH', true, 0) returning id into v_rest_zone;
+
+  insert into public.shipping_zone_areas (tenant_id, zone_id, level, city_code)
+  values (i.rhea_tenant, v_davao_zone, 'city', '112402000');
+  insert into public.shipping_zone_areas (tenant_id, zone_id, level, region_code)
+  values (i.rhea_tenant, v_mindanao_zone, 'region', '110000000'),
+         (i.rhea_tenant, v_mindanao_zone, 'region', '100000000');
+
+  insert into public.shipping_rates (tenant_id, zone_id, name, rate_type, flat_centavos)
+  values (i.rhea_tenant, v_davao_zone, 'Standard', 'flat', 8000),
+         (i.rhea_tenant, v_mindanao_zone, 'Standard', 'flat', 15000);
+  insert into public.shipping_rates
+    (tenant_id, zone_id, name, rate_type, flat_centavos, free_over_centavos)
+  values (i.rhea_tenant, v_rest_zone, 'Standard', 'flat', 20000, 200000);
+
+  -- Marlon gets his own configuration, deliberately covering the SAME city, to
+  -- prove the per-tenant uniqueness is per *tenant* and not global.
+  insert into public.shipping_zones (tenant_id, name, is_default)
+  values (i.marlon_tenant, 'Everywhere', true) returning id into v_rest_zone;
+  insert into public.shipping_zone_areas (tenant_id, zone_id, level, city_code)
+  values (i.marlon_tenant, v_rest_zone, 'city', '112402000');
+  insert into public.shipping_rates (tenant_id, zone_id, name, rate_type, flat_centavos)
+  values (i.marlon_tenant, v_rest_zone, 'Standard', 'flat', 9900);
+
+  perform tests.pass('phase 7 fixture: three zones for Rhea, one for Marlon');
+end;
+$$;
+
+set local role authenticated;
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+
+-- ---- The specificity ladder ------------------------------------------------
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+
+  -- City beats the region it sits in. This is the assertion the whole phase turns
+  -- on: Davao City is inside Davao Region, and both have a zone.
+  perform tests.eq(
+    (select name from public.shipping_zones
+      where id = public.resolve_shipping_zone(
+        i.rhea_tenant, '110000000', '112400000', '112402000')),
+    'Davao City',
+    'a city rule beats the region rule that also covers it');
+
+  -- A different city in the same region falls back to the region rule.
+  perform tests.eq(
+    (select name from public.shipping_zones
+      where id = public.resolve_shipping_zone(
+        i.rhea_tenant, '110000000', '112400000', '112401000')),
+    'Mindanao',
+    'another city in Davao Region resolves to the region zone');
+
+  -- Somewhere in no listed area at all gets the fallback.
+  perform tests.eq(
+    (select name from public.shipping_zones
+      where id = public.resolve_shipping_zone(
+        i.rhea_tenant, '070000000', '072200000', '072217000')),
+    'Rest of PH',
+    'Cebu City is in no listed area and resolves to the fallback');
+
+  -- NCR has no province. A resolver that assumed three levels of code would
+  -- return nothing here rather than the fallback, and the buyer could not check
+  -- out at all — see the PSGC note in CLAUDE.md.
+  perform tests.eq(
+    (select name from public.shipping_zones
+      where id = public.resolve_shipping_zone(
+        i.rhea_tenant, '130000000', null, '137404000')),
+    'Rest of PH',
+    'an NCR address with a null province still resolves');
+end;
+$$;
+
+-- ---- What it charges -------------------------------------------------------
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+
+  perform tests.eq(
+    (public.quote_shipping(i.rhea_tenant, '110000000', '112400000', '112402000', 50000, 500)
+      ->> 'amount')::bigint,
+    8000::bigint, 'Davao City is quoted P80');
+  perform tests.eq(
+    (public.quote_shipping(i.rhea_tenant, '100000000', '104300000', '104305000', 50000, 500)
+      ->> 'amount')::bigint,
+    15000::bigint, 'Northern Mindanao is quoted P150');
+  perform tests.eq(
+    (public.quote_shipping(i.rhea_tenant, '070000000', '072200000', '072217000', 50000, 500)
+      ->> 'amount')::bigint,
+    20000::bigint, 'Cebu City falls to the P200 fallback');
+
+  -- The free-over threshold is a modifier on the rate, not a fourth zone.
+  perform tests.eq(
+    (public.quote_shipping(i.rhea_tenant, '070000000', '072200000', '072217000', 200000, 500)
+      ->> 'amount')::bigint,
+    0::bigint, 'the fallback ships free at exactly P2,000');
+  perform tests.eq(
+    (public.quote_shipping(i.rhea_tenant, '070000000', '072200000', '072217000', 199999, 500)
+      ->> 'amount')::bigint,
+    20000::bigint, 'and still charges one centavo below the threshold');
+
+  -- Davao City's rate has no threshold of its own, so a big order still pays P80.
+  -- Worth pinning: a resolver that inherited the fallback's modifier would give
+  -- away shipping the seller never agreed to.
+  perform tests.eq(
+    (public.quote_shipping(i.rhea_tenant, '110000000', '112400000', '112402000', 500000, 500)
+      ->> 'amount')::bigint,
+    8000::bigint, 'a zone does not inherit the fallback''s free-shipping threshold');
+end;
+$$;
+
+-- ---- Cross-tenant isolation ------------------------------------------------
+select tests.login('22222222-2222-2222-2222-222222222222', 'marlon@example.ph');
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+
+  perform tests.eq((select count(*)::int from public.shipping_zones
+    where tenant_id = i.rhea_tenant), 0,
+    'Marlon sees none of Rhea''s shipping zones');
+  perform tests.eq((select count(*)::int from public.shipping_zone_areas
+    where tenant_id = i.rhea_tenant), 0,
+    'nor which places she ships to');
+  perform tests.eq((select count(*)::int from public.shipping_rates
+    where tenant_id = i.rhea_tenant), 0,
+    'nor what she charges — a competitor''s pricing is not public');
+
+  -- He does see his own, including the same city Rhea also covers.
+  perform tests.eq((select count(*)::int from public.shipping_zones), 1,
+    'but he sees his own zone');
+  perform tests.eq((select count(*)::int from public.shipping_zone_areas
+    where city_code = '112402000'), 1,
+    'two tenants may both cover Davao City — uniqueness is per tenant');
+
+  -- Writing into her tenant is a WITH CHECK violation, which raises.
+  perform tests.rejects(
+    format($q$ insert into public.shipping_zones (tenant_id, name)
+               values (%L, 'Hostile zone') $q$, i.rhea_tenant),
+    'Marlon cannot create a zone in Rhea''s tenant');
+
+  -- And her rows are not reachable to change or remove. Blocked by RLS, so this
+  -- affects zero rows rather than raising — the distinction that bit phase 6.
+  perform tests.eq(
+    tests.affected(format($q$ update public.shipping_rates set flat_centavos = 1
+                              where tenant_id = %L $q$, i.rhea_tenant)),
+    0::bigint, 'and cannot reprice her shipping');
+  perform tests.eq(
+    tests.affected(format($q$ delete from public.shipping_zones
+                              where tenant_id = %L $q$, i.rhea_tenant)),
+    0::bigint, 'and cannot delete her zones');
+
+  -- The resolver is tenant-scoped too: asking it about her tenant must not leak
+  -- a zone id, even though the function is SECURITY DEFINER.
+  perform tests.ok(
+    public.resolve_shipping_zone(i.rhea_tenant, '110000000', '112400000', '112402000') is null,
+    'the resolver returns nothing for a tenant the caller is not a member of');
+end;
+$$;
+
+-- ---- Role enforcement ------------------------------------------------------
+-- A packer needs to know what shipping costs to print a label. Deciding what it
+-- costs is a different job, and the policies say so.
+select tests.login('33333333-3333-3333-3333-333333333333', 'jess@example.ph');
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+
+  perform tests.eq((select count(*)::int from public.shipping_zones), 3,
+    'a packer reads the shipping configuration');
+  perform tests.eq((select count(*)::int from public.shipping_rates), 3,
+    'including the rates, which she needs to quote a buyer');
+
+  perform tests.rejects(
+    format($q$ insert into public.shipping_zones (tenant_id, name)
+               values (%L, 'Packer zone') $q$, i.rhea_tenant),
+    'but a packer cannot create a zone');
+  perform tests.eq(
+    tests.affected($q$ update public.shipping_rates set flat_centavos = 1 $q$),
+    0::bigint, 'nor change what shipping costs');
+  perform tests.eq(
+    tests.affected($q$ delete from public.shipping_zone_areas $q$),
+    0::bigint, 'nor change where the store ships to');
+end;
+$$;
+
+-- ---- Schema guards ---------------------------------------------------------
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+do $$
+declare
+  i record;
+  v_zone uuid;
+  v_marlon_zone uuid;
+begin
+  select * into i from tests.ids;
+  select id into v_zone from public.shipping_zones where name = 'Davao City';
+
+  -- One fallback per tenant. Two would make "which rate applies" a coin toss
+  -- decided by row order.
+  perform tests.rejects(
+    format($q$ insert into public.shipping_zones (tenant_id, name, is_default)
+               values (%L, 'Second fallback', true) $q$, i.rhea_tenant),
+    'a tenant cannot have two fallback zones');
+
+  -- The level must agree with which code column is populated. Without this a row
+  -- could claim level 'city' while carrying only a region code, and would then
+  -- match at specificity 3 for an entire region.
+  perform tests.rejects(
+    format($q$ insert into public.shipping_zone_areas
+                 (tenant_id, zone_id, level, region_code)
+               values (%L, %L, 'city', '110000000') $q$, i.rhea_tenant, v_zone),
+    'an area''s level must match the code column it fills');
+
+  -- A place code that is not in PSGC is rejected at write time. This is the whole
+  -- reason zone areas are columns with real foreign keys instead of the spec's
+  -- match_rules JSONB: phase 6 shipped a JSONB address that happily accepted a
+  -- region code in the city field, because JSONB has no foreign keys.
+  perform tests.rejects(
+    format($q$ insert into public.shipping_zone_areas
+                 (tenant_id, zone_id, level, city_code)
+               values (%L, %L, 'city', '999999999') $q$, i.rhea_tenant, v_zone),
+    'a city code that is not in PSGC is rejected');
+
+  -- The same place twice in one tenant is ambiguous, whether or not it is the
+  -- same zone.
+  perform tests.rejects(
+    format($q$ insert into public.shipping_zone_areas
+                 (tenant_id, zone_id, level, city_code)
+               values (%L, %L, 'city', '112402000') $q$, i.rhea_tenant, v_zone),
+    'the same city cannot be listed twice in one tenant');
+
+  -- A flat rate with no amount would resolve to a null quote at checkout.
+  perform tests.rejects(
+    format($q$ insert into public.shipping_rates
+                 (tenant_id, zone_id, name, rate_type, flat_centavos)
+               values (%L, %L, 'Broken', 'flat', null) $q$, i.rhea_tenant, v_zone),
+    'a flat rate must carry an amount');
+
+  -- The composite FK, not a trigger: give the parent `unique (tenant_id, id)` and
+  -- a cross-tenant child becomes unrepresentable rather than merely forbidden.
+  reset role;
+  select id into v_marlon_zone from public.shipping_zones where tenant_id = i.marlon_tenant;
+  set local role authenticated;
+  perform tests.rejects(
+    format($q$ insert into public.shipping_zone_areas
+                 (tenant_id, zone_id, level, city_code)
+               values (%L, %L, 'city', '072217000') $q$, i.rhea_tenant, v_marlon_zone),
+    'a zone area cannot point at another tenant''s zone');
+end;
+$$;
+
+-- ---- Weight bands ----------------------------------------------------------
+do $$
+declare
+  i record;
+  v_zone uuid;
+  v_rate uuid;
+begin
+  select * into i from tests.ids;
+  select id into v_zone from public.shipping_zones where name = 'Mindanao';
+
+  insert into public.shipping_rates (tenant_id, zone_id, name, rate_type, sort_order)
+  values (i.rhea_tenant, v_zone, 'By weight', 'weight_tiered', 1)
+  returning id into v_rate;
+
+  -- The heaviest band is open-ended (`up_to_grams` null) so nothing is unpriced.
+  insert into public.shipping_weight_tiers (tenant_id, rate_id, up_to_grams, price_centavos)
+  values (i.rhea_tenant, v_rate, 1000, 12000),
+         (i.rhea_tenant, v_rate, 3000, 18000),
+         (i.rhea_tenant, v_rate, null, 25000);
+
+  perform tests.rejects(
+    format($q$ insert into public.shipping_weight_tiers
+                 (tenant_id, rate_id, up_to_grams, price_centavos)
+               values (%L, %L, null, 30000) $q$, i.rhea_tenant, v_rate),
+    'a rate cannot have two open-ended top bands');
+
+  -- Deactivate the flat rate so the tiered one is the rate in play.
+  update public.shipping_rates set is_active = false
+    where zone_id = v_zone and rate_type = 'flat';
+
+  perform tests.eq(
+    (public.quote_shipping(i.rhea_tenant, '100000000', '104300000', '104305000', 50000, 900)
+      ->> 'amount')::bigint,
+    12000::bigint, 'a 900g parcel falls in the first weight band');
+  perform tests.eq(
+    (public.quote_shipping(i.rhea_tenant, '100000000', '104300000', '104305000', 50000, 2500)
+      ->> 'amount')::bigint,
+    18000::bigint, 'a 2.5kg parcel falls in the middle band');
+  perform tests.eq(
+    (public.quote_shipping(i.rhea_tenant, '100000000', '104300000', '104305000', 50000, 40000)
+      ->> 'amount')::bigint,
+    25000::bigint, 'and a 40kg parcel falls in the open-ended band, not off the end');
+end;
+$$;
+
+-- ---- The buyer's side ------------------------------------------------------
+-- A zone layout is the seller's commercial arrangement. A buyer gets one resolved
+-- number through the cart functions and must not be able to enumerate the rest —
+-- including, in particular, what other areas cost.
+select tests.logout();
+set local role anon;
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+
+  perform tests.rejects($q$ select count(*) from public.shipping_zones $q$,
+    'anon has no grant on shipping_zones');
+  perform tests.rejects($q$ select count(*) from public.shipping_zone_areas $q$,
+    'anon has no grant on shipping_zone_areas');
+  perform tests.rejects($q$ select count(*) from public.shipping_rates $q$,
+    'anon has no grant on shipping_rates');
+  perform tests.rejects($q$ select count(*) from public.shipping_weight_tiers $q$,
+    'anon has no grant on shipping_weight_tiers');
+
+  perform tests.rejects(
+    format($q$ select public.resolve_shipping_zone(%L, '110000000', '112400000', '112402000') $q$,
+      i.rhea_tenant),
+    'and cannot call the resolver directly');
+  perform tests.rejects(
+    format($q$ select public.quote_shipping(%L, '110000000', '112400000', '112402000', 50000, 500) $q$,
+      i.rhea_tenant),
+    'nor price an arbitrary address');
+end;
+$$;
+
+reset role;
+set local role authenticated;
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+
+-- ---------------------------------------------------------------------------
 -- my_tenants()
 -- ---------------------------------------------------------------------------
 \echo ''
@@ -1773,8 +2153,8 @@ declare v_passed int := coalesce(nullif(current_setting('tests.passed', true), '
 begin
   raise notice '';
   raise notice '=== % assertions passed', v_passed;
-  if v_passed < 210 then
-    raise exception 'Expected at least 210 assertions, only % ran — did a section get skipped?', v_passed
+  if v_passed < 255 then
+    raise exception 'Expected at least 255 assertions, only % ran — did a section get skipped?', v_passed
       using errcode = 'triggered_action_exception';
   end if;
 end;

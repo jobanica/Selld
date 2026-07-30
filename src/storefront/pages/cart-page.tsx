@@ -212,15 +212,34 @@ function QtyStepper({ variantId, qty }: { variantId: string; qty: number }) {
 
 export function Totals({ quote, className }: { quote: CartQuote; className?: string }) {
   const { t } = useTranslation()
+
+  // "Add ₱240 more for free shipping" converts better than any discount badge, and
+  // it is only honest when a threshold actually exists and has not been reached.
+  const freeOver = quote.shipping?.freeOver ?? null
+  const freeOverGap =
+    freeOver !== null && freeOver !== undefined && !(quote.shipping?.freeApplied ?? false)
+      ? freeOver - quote.subtotal
+      : null
+
   return (
     <dl className={cn('mt-4 flex flex-col gap-1.5 rounded-xl border p-4 text-sm', className)}>
       <Row label={t('cart.subtotal')} value={formatPHP(money(quote.subtotal))} />
       <Row
-        label={t('cart.shipping')}
+        label={
+          // Said plainly. Before a destination is known this is the catch-all zone's
+          // price, and a buyer who sees it change at checkout with no explanation
+          // concludes the store is playing games.
+          quote.shippingEstimated === true ? t('cart.shippingEstimated') : t('cart.shipping')
+        }
         value={
           quote.shippingTotal === 0 ? t('cart.free') : formatPHP(money(quote.shippingTotal))
         }
       />
+      {freeOverGap !== null && (
+        <p className="text-xs text-primary">
+          {t('cart.freeShippingNudge', { amount: formatPHP(money(freeOverGap)) })}
+        </p>
+      )}
       {quote.codFee > 0 && (
         <Row label={t('cart.codFee')} value={formatPHP(money(quote.codFee))} />
       )}

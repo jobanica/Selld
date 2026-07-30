@@ -1,4 +1,5 @@
 import { getSupabase, type SelldClient } from '@/lib/supabase/client'
+import { errorMessage } from '@/lib/supabase/errors'
 
 /**
  * Inventory reads and writes.
@@ -237,8 +238,11 @@ export async function countLowStock(
  * one that will actually happen during a live selling rush.
  */
 export function describeStockError(error: unknown): 'insufficient_stock' | 'not_allowed' | 'other' {
-  if (!(error instanceof Error)) return 'other'
-  const message = error.message.toLowerCase()
+  // Not `error instanceof Error`: PostgREST rejections arrive as plain objects, so
+  // that guard sent every oversell attempt to 'other' — a generic retry prompt in
+  // exactly the moment a seller needs to be told the stock is gone.
+  // See src/lib/supabase/errors.ts.
+  const message = errorMessage(error).toLowerCase()
   if (message.includes('insufficient stock')) return 'insufficient_stock'
   if (message.includes('not allowed') || message.includes('permission')) return 'not_allowed'
   // The no-oversell CHECK, if a future path bypasses the RPC.

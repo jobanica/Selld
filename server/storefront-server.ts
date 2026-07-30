@@ -13,6 +13,7 @@ import type { HomePayload, PageData, ProductPayload } from '../src/storefront/st
 import {
   fetchPsgcOptions,
   fetchQuote,
+  fetchQuoteForAddress,
   fetchReceipt,
   handleCartAdd,
   handleCartQty,
@@ -528,7 +529,9 @@ async function renderCheckout(
   },
 ): Promise<void> {
   const token = cartTokenFrom(request)
-  const quote = await fetchQuote(context.supabase, token)
+  // Priced against the destination the buyer has chosen so far, so the shipping
+  // line is the real zone rate rather than the cart page's catch-all estimate.
+  const quote = await fetchQuoteForAddress(context.supabase, token, input.address)
 
   // An empty cart has nothing to check out. Sending the buyer back is kinder than
   // rendering a form that cannot be submitted.
