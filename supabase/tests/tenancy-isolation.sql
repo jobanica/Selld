@@ -3459,6 +3459,274 @@ set local role authenticated;
 select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
 
 -- ---------------------------------------------------------------------------
+-- Phase 13: live selling
+-- ---------------------------------------------------------------------------
+-- The comment webhook is the widest door in the product: it reserves a seller's
+-- stock for a buyer with no account, on the strength of a URL. Everything below
+-- aims at that — and at the two `_raw` primitives it needs, which move inventory
+-- with no authorisation at all.
+\echo ''
+\echo '=== Phase 13: live selling'
+
+reset role;
+do $$
+declare
+  i record;
+  v_session uuid;
+  v_variant uuid;
+begin
+  select * into i from tests.ids;
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', i.rhea, 'role', 'authenticated')::text, true);
+
+  v_session := (public.live_session_create(i.rhea_tenant, 'Test live', 'facebook',
+    'fb-test-video', 30) ->> 'id')::uuid;
+
+  select id into v_variant from public.product_variants where tenant_id = i.rhea_tenant limit 1;
+
+  -- Stock of its own, rather than whatever earlier phases happened to leave. A
+  -- fixture that depends on the residue of the tests above passes on a dirty
+  -- database and fails on a clean one, which is the worst way round.
+  insert into public.stock_movements (tenant_id, variant_id, location_id, delta, reason)
+  select i.rhea_tenant, v_variant, l.id, 50, 'receive'
+  from public.locations l where l.tenant_id = i.rhea_tenant order by l.created_at limit 1;
+
+  perform public.live_item_add(v_session, v_variant, 'A1', null);
+  perform public.live_session_update(v_session, 'live', 'A1');
+
+  create table tests.p13 as select v_session as session_id, v_variant as variant_id;
+  grant select on tests.p13 to authenticated, anon;
+
+  perform tests.pass('phase 13 fixture: a live session with one item on the board');
+end;
+$$;
+
+-- ---- A session belongs to one store ----------------------------------------
+set local role authenticated;
+select tests.login('22222222-2222-2222-2222-222222222222', 'marlon@example.ph');
+do $$
+declare
+  i record;
+  p record;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p13;
+
+  perform tests.eq((select count(*)::int from public.live_sessions), 0,
+    'Marlon sees none of Rhea''s live sessions');
+  perform tests.eq((select count(*)::int from public.live_items), 0,
+    'nor what is on her board');
+  perform tests.eq((select count(*)::int from public.live_comments), 0,
+    'nor a single comment from her broadcast');
+  perform tests.eq((select count(*)::int from public.live_claims), 0,
+    'nor who claimed what');
+
+  perform tests.rejects(
+    format($q$ select public.live_console(%L) $q$, p.session_id),
+    'and he cannot watch her console');
+  perform tests.rejects(
+    format($q$ select public.live_session_update(%L, 'ended') $q$, p.session_id),
+    'nor end her broadcast from under her');
+  perform tests.rejects(
+    format($q$ select public.live_item_add(%L, %L, 'Z9') $q$, p.session_id, p.variant_id),
+    'nor put something on her board');
+  perform tests.rejects(
+    format($q$ select public.live_sessions_list(%L) $q$, i.rhea_tenant),
+    'nor list her sessions');
+end;
+$$;
+
+-- ---- The ingest path is the server's alone ---------------------------------
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+do $$
+declare
+  i record;
+  p record;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p13;
+
+  -- Not even the store's owner reserves stock by hand. Everything that holds
+  -- inventory goes through a function that checks something first.
+  perform tests.rejects(
+    format($q$ select public.reserve_stock_raw(%L, %L, '[]'::jsonb) $q$,
+      i.rhea_tenant, (select id from public.locations where tenant_id = i.rhea_tenant limit 1)),
+    'the unchecked reserve is callable by nobody');
+  perform tests.rejects(
+    format($q$ select public.release_reservation_raw(%L, %L, '[]'::jsonb) $q$,
+      i.rhea_tenant, (select id from public.locations where tenant_id = i.rhea_tenant limit 1)),
+    'and neither is the unchecked release');
+  perform tests.rejects(
+    $q$ select public.live_session_for_ref('facebook', 'fb-test-video') $q$,
+    'nor the lookup that crosses tenants to find a session by video id');
+  perform tests.rejects(
+    $q$ select public.live_expire_claims() $q$,
+    'nor the sweep that releases holds across every session on the platform');
+
+  -- Writes go through functions, so the tables themselves are read-only.
+  perform tests.rejects(
+    format($q$ insert into public.live_claims (tenant_id, session_id, item_id, psid, qty, expires_at)
+               values (%L, %L, gen_random_uuid(), 'x', 1, now()) $q$,
+      i.rhea_tenant, p.session_id),
+    'and a claim cannot be written straight into the table');
+  perform tests.rejects(
+    format($q$ insert into public.live_comments (tenant_id, session_id, external_id, psid, body)
+               values (%L, %L, 'x', 'y', 'mine') $q$, i.rhea_tenant, p.session_id),
+    'nor a comment');
+  perform tests.rejects(
+    $q$ update public.live_sessions set status = 'ended' $q$,
+    'nor a session ended by hand');
+end;
+$$;
+
+-- ---- What the webhook can and cannot do ------------------------------------
+reset role;
+do $$
+declare
+  i record;
+  p record;
+  v_res jsonb;
+  v_before int;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p13;
+
+  select coalesce(sum(reserved), 0)::int into v_before
+  from public.inventory_levels where tenant_id = i.rhea_tenant;
+
+  -- The parse is a claim *about* a claim. The client says "A1"; the function
+  -- resolves that against this session's own items before holding anything.
+  v_res := public.live_ingest_comment(p.session_id, 'ext-1', 'psid-1', 'mine po',
+    '[{"code":"A1","qty":1}]'::jsonb, 'claimed', 'Buyer');
+  perform tests.eq(v_res ->> 'outcome', 'claimed', 'a comment holds stock');
+  perform tests.eq(
+    (select coalesce(sum(reserved), 0)::int from public.inventory_levels
+      where tenant_id = i.rhea_tenant), v_before + 1,
+    'and the hold is real, not a row that says it is');
+
+  -- Facebook redelivers. Routinely, and on no schedule.
+  v_res := public.live_ingest_comment(p.session_id, 'ext-1', 'psid-1', 'mine po',
+    '[{"code":"A1","qty":1}]'::jsonb, 'claimed', 'Buyer');
+  perform tests.eq(v_res ->> 'outcome', 'duplicate',
+    'the same comment id twice is a duplicate');
+  perform tests.eq(
+    (select coalesce(sum(reserved), 0)::int from public.inventory_levels
+      where tenant_id = i.rhea_tenant), v_before + 1,
+    'and it holds nothing more');
+
+  -- A client asserting a code this session does not sell gets nothing, and
+  -- specifically does not get whatever is on screen instead.
+  v_res := public.live_ingest_comment(p.session_id, 'ext-2', 'psid-2', 'mine Z9',
+    '[{"code":"Z9","qty":1}]'::jsonb, 'claimed', 'Buyer');
+  perform tests.eq(v_res ->> 'outcome', 'unknown_code',
+    'a code the session does not sell holds nothing');
+  perform tests.eq(
+    (select coalesce(sum(reserved), 0)::int from public.inventory_levels
+      where tenant_id = i.rhea_tenant), v_before + 1,
+    'and does not quietly claim the item on screen instead');
+
+  -- A quantity the client inflated is clamped, not trusted.
+  v_res := public.live_ingest_comment(p.session_id, 'ext-3', 'psid-3', 'mine',
+    '[{"code":"A1","qty":9999}]'::jsonb, 'claimed', 'Buyer');
+  perform tests.ok(
+    (select coalesce(sum(reserved), 0)::int from public.inventory_levels
+      where tenant_id = i.rhea_tenant) <= v_before + 21,
+    'and a client cannot ask for nine thousand units');
+end;
+$$;
+
+-- ---- Ending a session gives everything back --------------------------------
+do $$
+declare
+  i record;
+  p record;
+  v_before int;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p13;
+  perform set_config('request.jwt.claims',
+    json_build_object('sub', i.rhea, 'role', 'authenticated')::text, true);
+
+  perform tests.ok(
+    (select coalesce(sum(reserved), 0)::int from public.inventory_levels
+      where tenant_id = i.rhea_tenant) > 0,
+    'the session is holding stock');
+
+  perform public.live_session_update(p.session_id, 'ended');
+
+  perform tests.eq(
+    (select count(*)::int from public.live_claims
+      where session_id = p.session_id and status = 'reserved'), 0,
+    'and ending it settles every hold');
+end;
+$$;
+
+-- ---- A buyer has no business here ------------------------------------------
+select tests.logout();
+set local role anon;
+do $$
+declare
+  i record;
+  p record;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p13;
+
+  perform tests.rejects($q$ select count(*) from public.live_sessions $q$,
+    'anon has no grant on live sessions');
+  perform tests.rejects($q$ select count(*) from public.live_items $q$,
+    'nor on the board');
+  perform tests.rejects($q$ select count(*) from public.live_comments $q$,
+    'nor on the comments');
+  perform tests.rejects($q$ select count(*) from public.live_claims $q$,
+    'nor on who claimed what');
+
+  perform tests.rejects(
+    format($q$ select public.live_ingest_comment(%L, 'x', 'y', 'mine', '[]'::jsonb) $q$,
+      p.session_id),
+    'and above all cannot reserve a seller''s stock by posting a comment');
+  perform tests.rejects(
+    format($q$ select public.live_console(%L) $q$, p.session_id),
+    'nor watch somebody else''s live sale');
+end;
+$$;
+
+-- ---- Deleting a parent no longer breaks on the composite key ---------------
+-- Sixteen `on delete set null` constraints tried to null `tenant_id` as well,
+-- which is `not null` on every one of them — so deleting a product that had been
+-- ordered, a category with products, or a customer with orders simply raised.
+reset role;
+do $$
+declare
+  i record;
+  v_product uuid;
+begin
+  select * into i from tests.ids;
+
+  select p.id into v_product
+  from public.products p
+    join public.product_variants v on v.product_id = p.id
+    join public.order_items oi on oi.variant_id = v.id
+  where p.tenant_id = i.rhea_tenant
+  limit 1;
+
+  perform tests.ok(v_product is not null,
+    'there is a product that has actually been ordered');
+  perform tests.eq(
+    tests.affected(format($q$ delete from public.products where id = %L $q$, v_product)),
+    1::bigint,
+    'and deleting it succeeds rather than raising on order_items.tenant_id');
+  perform tests.ok(
+    exists (select 1 from public.order_items where variant_id is null),
+    'the order line survives with its snapshot, pointing at nothing');
+end;
+$$;
+
+reset role;
+set local role authenticated;
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+
+-- ---------------------------------------------------------------------------
 -- my_tenants()
 -- ---------------------------------------------------------------------------
 \echo ''
@@ -3495,8 +3763,8 @@ declare v_passed int := coalesce(nullif(current_setting('tests.passed', true), '
 begin
   raise notice '';
   raise notice '=== % assertions passed', v_passed;
-  if v_passed < 425 then
-    raise exception 'Expected at least 425 assertions, only % ran — did a section get skipped?', v_passed
+  if v_passed < 465 then
+    raise exception 'Expected at least 465 assertions, only % ran — did a section get skipped?', v_passed
       using errcode = 'triggered_action_exception';
   end if;
 end;

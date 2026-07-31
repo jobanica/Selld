@@ -1284,3 +1284,105 @@ reconciliation screen cannot explain.
 
 **Gate:** `pnpm verify` (442 tests), `pnpm db:test` (442 assertions),
 `pnpm db:test:concurrency`. All 17 migrations apply from scratch on PG 17.6.
+
+---
+
+## Phase 13 — Live selling capture
+
+**Done when:** a 200-comment live session produces correct orders with zero manual
+encoding, and a dry-run replay of a real comment log scores ≥95% parse accuracy.
+
+**Measured** over the real webhook, against the real database, with 200 comments in
+the proportions a Philippine live session actually has — mostly bare `mine` while
+the seller holds something up, a long tail of Taglish and Bisaya variants, questions
+and chatter mixed through, buyers double-posting, and Facebook redelivering ten of
+them:
+
+| | Result |
+|---|---|
+| 200 comments through the webhook | **2.1 s** |
+| Parse accuracy | **200/200 = 100%** (bar: 95%) |
+| Corpus replay (122 hand-labelled comments) | **100%** |
+| Claims held, without anyone typing | 157 claims, 149 buyers, 178 units |
+| Stock actually reserved | 178, matching the claims exactly |
+| Chatter kept for the operator | 43 of 43 |
+| Redelivered webhooks | 0 extra comments, 0 extra units, `200 duplicate` each |
+| A buyer taps the Messenger link | 303 → checkout, cart cookie handed over, claim converted |
+| Session ends | 178 holds → 1 (the converted order's) |
+
+### What shipped
+
+- **A Taglish/Bisaya claim parser** with a hand-labelled corpus of 122 comments,
+  written **before** the parser and scored as a whole. It reads `mine`, `sakin`,
+  `akoa`, `sa ako`, `kuha ko`, quantities as `2pcs`/`x2`/`dalawa`/`duha`/`two`, codes
+  split as `A 1` or `A-1`, several claims in one comment, and — the part that
+  matters most — it refuses `ang ganda ng A1` and `magkano po A1?`.
+- **The bare `mine`.** The commonest comment in a PH live sale is one word, and it
+  means "the thing you are holding". `live_sessions.current_item_id` is what makes
+  it parseable, and tapping a row on the board is what sets it.
+- **Reserving in SQL, parsing in TypeScript.** Thirty buyers claiming the last two
+  units in the same second is the normal case, so holding stock goes through phase
+  4's sorted advisory locks. `live_ingest_comment` treats the parse as a *claim
+  about a claim* and re-resolves the code against the session's own items.
+- **Idempotency on Facebook's own comment id.** A redelivered webhook returns
+  `duplicate` with a 200 — not a 5xx, because Facebook retries a 5xx forever and
+  disables a subscription that keeps erroring.
+- **A claim mints a cart**, and the Messenger link (`/live/claim/{token}`) adopts
+  it and drops the buyer on checkout with the right item already in it. No price
+  lives on the live item: `cart_pricing()` is still the only place money is computed.
+- **An operator console** polling every two seconds: the board with what is left,
+  the claim feed showing the comment behind each claim, and — deliberately — the
+  comments the parser could *not* use. A console that only shows successes hides
+  its own failures.
+- **Expiry.** A claim holds stock for the session's window and then goes back on
+  sale; ending a session releases everything still held.
+
+### The find that matters most
+
+**`ON DELETE SET NULL` on a composite foreign key nulls every column in the key**,
+including the denormalised `tenant_id` — which is `NOT NULL` on all sixteen tables
+that had one. So before this phase:
+
+- deleting a product that had ever been ordered raised
+- deleting a category with products raised
+- deleting a customer who had ordered raised
+- deleting a location, a shipment or a cart with an order attached raised
+
+Every one of those is a button in the dashboard that answered "something went
+wrong". It was invisible because the tenancy suite deletes *tenants*, where the
+children cascade away for a different reason and the SET NULL never fires. Fixed
+with Postgres 15's `on delete set null (column_list)` across all sixteen, with a CI
+step so the next composite FK cannot repeat it.
+
+### Notable findings
+
+| Symptom | Cause |
+|---|---|
+| Every row on the board lost its `aria-pressed` | `x.id = v_session.current_item_id` is SQL `NULL`, not `false`, when nothing is on screen — and a null reaches React as "omit this attribute". `coalesce(..., false)`. |
+| The setup panel collapsed after every item added | It was rendered in two different branches of the tree, so the first item unmounted and remounted it and its open state reset. A seller listing thirty items had to re-open it thirty times. One instance, `compact` as a prop. |
+| The operator's comment box got a 403 | `live_ingest_comment` is service-role only, correctly — but a seller on the manual channel *is* the ingest. A checked `live_ingest_manual` wrapper, the same split as `reserve_stock`/`reserve_stock_raw`. |
+| A converted claim held its unit twice | In this schema an order *reserves*; `ship_reservation` is what turns a hold into a sale. So at checkout the claim and the order both held the same unit, and the first version of the trigger reasoned from a misread of `apply_reservation`. The claim hands its hold over. |
+
+### Deliberately deferred
+
+- **The Send API is not wired.** `MessengerProvider` is a port with a `log`
+  implementation, exercised on every claim; the real Send API call needs a page
+  access token, which needs OAuth, which is phase 14. Registering it there changes
+  no line of the live-selling code.
+- **No expiry scheduler.** `live_expire_claims()` is written, tested and released by
+  ending a session; the timer that sweeps mid-broadcast belongs with the job runner
+  that phases 10 and 11 are also waiting on.
+- **No live-only price.** A live item is a variant at the variant's price. A
+  live-only price would have to flow through `cart_pricing()` to be charged, and a
+  displayed price that is not charged is the phase-6 snapshot trap wearing a hat.
+- **Instagram and TikTok** are in the channel CHECK and have no ingest.
+
+### Still needed outside the repo
+
+- `LIVE_WEBHOOK_SECRET` in the server environment, and the resulting URL —
+  `/api/webhooks/live/facebook/{secret}` — subscribed on the page. `FB_APP_SECRET`
+  is optional but, when set, `X-Hub-Signature-256` becomes mandatory.
+  `FB_WEBHOOK_VERIFY_TOKEN` is needed for Facebook's subscription handshake.
+
+**Gate:** `pnpm verify` (458 tests), `pnpm db:test` (476 assertions),
+`pnpm db:test:concurrency`. All 18 migrations apply from scratch on PG 17.6.

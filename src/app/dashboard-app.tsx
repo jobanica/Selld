@@ -10,6 +10,7 @@ import { SessionProvider } from '@/features/auth/session-provider'
 import { ProductListPage } from '@/features/catalog/product-list-page'
 import { CodPage } from '@/features/cod/cod-page'
 import { InventoryPage } from '@/features/inventory/inventory-page'
+import { LivePage } from '@/features/live/live-page'
 import { OrdersPage } from '@/features/orders/orders-page'
 import { PaymentsPage } from '@/features/payments/payments-page'
 import { ShippingPage } from '@/features/shipping/shipping-page'
@@ -28,7 +29,7 @@ export default function DashboardApp() {
   // Routes that have a real implementation. Everything else in the nav still
   // renders a placeholder rather than 404ing.
   const implemented = new Set([
-    '/', '/orders', '/products', '/inventory', '/shipping', '/payments', '/cod',
+    '/', '/orders', '/products', '/inventory', '/shipping', '/payments', '/cod', '/live',
   ])
   const pending = ALL_NAV_ITEMS.filter((item) => !implemented.has(item.to))
 
@@ -54,6 +55,7 @@ export default function DashboardApp() {
             <Route path="/payments" element={<PaymentsPage />} />
             <Route path="/orders" element={<OrdersPage />} />
             <Route path="/cod" element={<CodPage />} />
+            <Route path="/live" element={<LivePage />} />
             {pending.map((item) => (
               <Route key={item.to} path={item.to} element={<ComingSoon />} />
             ))}

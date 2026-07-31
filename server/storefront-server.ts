@@ -28,9 +28,10 @@ import {
   readRememberedCheckout,
   type StoreRef,
 } from './cart-routes'
-import { CART_COOKIE } from './cookies'
+import { CART_COOKIE, cartCookie, isSecureRequest } from './cookies'
 import { serveCourierRoutes } from './courier-routes'
 import { serveXenditWebhook } from './payment-webhook'
+import { serveLiveWebhook } from './live-routes'
 import { serveCourierWebhook } from './tracking'
 import { readSupabaseConfig, rpc, type SupabaseConfig } from './supabase-rpc'
 
@@ -295,6 +296,11 @@ async function handle(
   // as the payment webhook: a courier posts to whatever host was configured.
   if (await serveCourierWebhook(request, response, url.pathname, storeRootUrl(url))) return
 
+  // Live-selling comments. Same shape as the courier webhook, and answered before
+  // surface routing for the same reason: this arrives on the platform's own
+  // hostname, not on any seller's store.
+  if (await serveLiveWebhook(request, response, url, storeRootUrl(url))) return
+
   // `.localhost` subdomains resolve to 127.0.0.1 in every modern browser, so
   // `rheas-finds.localhost:5174` exercises the real subdomain path in dev.
   const surface = resolveSurface(hostname, {
@@ -389,6 +395,30 @@ async function handle(
       },
       error: null,
     })
+  }
+
+  // ---- A live claim, handed over --------------------------------------
+  // The link a buyer gets in Messenger seconds after commenting "mine". It adopts
+  // the cart the claim minted and drops them on checkout with the right item
+  // already in it — which is the whole difference between a live sale that
+  // converts and one where thirty people ask "how po ang bayad".
+  //
+  // A GET that sets a cookie, deliberately: the buyer is arriving from another
+  // app, so there is no form to POST, and the token in the URL *is* the
+  // capability. It redirects immediately so the token stops being in the address
+  // bar the buyer might screenshot and send to a group chat.
+  const claimMatch = /^\/live\/claim\/([0-9a-f]{64})$/.exec(url.pathname)
+  if (claimMatch !== null) {
+    response.writeHead(303, {
+      Location: '/checkout',
+      'Set-Cookie': cartCookie(claimMatch[1]!, isSecureRequest(request)),
+      'Cache-Control': 'no-store',
+      // Never indexed and never sent onward: the path is a bearer token.
+      'Referrer-Policy': 'no-referrer',
+      'X-Robots-Tag': 'noindex, nofollow',
+    })
+    response.end()
+    return
   }
 
   // ---- Public order tracking --------------------------------------------

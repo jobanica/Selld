@@ -5,7 +5,8 @@ Build one phase per session, in order. The full roadmap is in
 [`docs/build-spec.md`](docs/build-spec.md); who we're building for is in
 [`docs/avatar.md`](docs/avatar.md).
 
-**Current state: phase 12 complete.** Next up is phase 13 (live selling capture).
+**Current state: phase 13 complete.** Next up is phase 14 (Messenger & social
+integration).
 
 ---
 
@@ -18,7 +19,7 @@ pnpm dev:store        # storefront SSR server on :5174 — try rheas-finds.local
 pnpm verify           # typecheck + lint + test + build — run before every commit
 pnpm test:watch       # tests in watch mode
 pnpm start            # production storefront server (needs `pnpm build` first)
-                      # tracking webhooks need COURIER_WEBHOOK_SECRET set
+                      # webhooks need COURIER_WEBHOOK_SECRET and LIVE_WEBHOOK_SECRET
 pnpm seed:demo        # demo store + generated product images, for storefront work
 pnpm lighthouse       # Lighthouse mobile against a running `pnpm start`
 
@@ -207,6 +208,15 @@ What follows from that:
   or a seller would read their own two bad experiences back as four. A CI step
   asserts every one of those.
 
+- **Phase 13 adds a fourth: a Facebook comment.** The live webhook reserves a
+  seller's stock for someone with no account, on the strength of an unguessable URL
+  (plus `X-Hub-Signature-256` when an app secret is configured). So the parse the
+  client sends is treated as a *claim about a claim*: `live_ingest_comment`
+  re-resolves the code against the session's own items, clamps the quantity, and
+  holds stock through the same advisory-locked path the dashboard uses. It is
+  service-role only; the operator's own comment box goes through the checked
+  `live_ingest_manual` wrapper.
+
 **`cart_pricing()` is the only place money is computed.** The quote the buyer sees
 and the order that gets written both go through it, so they cannot disagree.
 `cart_items.unit_price_centavos` is a display snapshot and is never charged —
@@ -220,7 +230,7 @@ order still charges the live price. That assertion was verified to fail when
 src/
   App.tsx       ← picks a surface by hostname, lazy-loads it
   core/         ← extraction boundary; becomes @yourorg/ph-commerce-core
-    cod/ couriers/ payments/ sms/ marketplaces/ tenancy/ integration/
+    cod/ couriers/ live/ messaging/ payments/ sms/ marketplaces/ tenancy/ integration/
   app/          ← dashboard (authenticated seller surface)
   storefront/   ← public buyer surface, own perf budget
   features/     ← feature slices; may import from core and lib
@@ -416,6 +426,21 @@ one new file plus one registry line, and zero lines of order logic.
 - **`pnpm db:types` used to drop the file's hand-written header**, which CI's drift
   check strips with `tail -n +10`. Running it therefore broke the check it exists to
   satisfy. The script now re-emits the header.
+- **`on delete set null` on a *composite* FK nulls every column in the key.** The
+  `(tenant_id, parent_id)` pattern above is right, but pairing it with a plain
+  `set null` makes the child's `tenant_id` a target — and it is `not null`, so the
+  parent's delete raises instead of cascading. Sixteen constraints shipped that way
+  and every one of them broke a delete button. Use `on delete set null (child_col)`
+  (Postgres 15+); a CI step now asserts no composite FK can regress.
+- **SQL `null` reaches React as "omit this attribute".** `x.id = v_session.current_item_id`
+  is NULL, not false, when the right-hand side is null — so `aria-pressed={null}`
+  removed the attribute from every row on the live board and every selector that
+  looked for it found nothing. `coalesce(..., false)` at the jsonb boundary.
+- **Render a component in one place, not one place per branch.** `{items.length === 0
+  ? <Setup/> : <><List/><Setup compact/></>}` is two positions in the tree, so the
+  first item unmounts and remounts `Setup` and resets its state. A seller adding
+  thirty items had to re-open the panel thirty times. Render it once and pass the
+  difference as a prop.
 - **A regex alternation for an XML element must try the self-closing form first.**
   `<row>…</row>|<row/>` lets an empty `<row r="2"/>` match the *first* branch from
   its own position all the way to the next row's `</row>`, swallowing a real row.

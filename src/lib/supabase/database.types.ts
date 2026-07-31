@@ -930,6 +930,324 @@ export type Database = {
           },
         ]
       }
+      live_claims: {
+        Row: {
+          buyer_name: string | null
+          cart_id: string | null
+          comment_id: string | null
+          created_at: string
+          expires_at: string
+          id: string
+          item_id: string
+          order_id: string | null
+          psid: string
+          qty: number
+          session_id: string
+          settled_at: string | null
+          status: string
+          tenant_id: string
+        }
+        Insert: {
+          buyer_name?: string | null
+          cart_id?: string | null
+          comment_id?: string | null
+          created_at?: string
+          expires_at: string
+          id?: string
+          item_id: string
+          order_id?: string | null
+          psid: string
+          qty: number
+          session_id: string
+          settled_at?: string | null
+          status?: string
+          tenant_id: string
+        }
+        Update: {
+          buyer_name?: string | null
+          cart_id?: string | null
+          comment_id?: string | null
+          created_at?: string
+          expires_at?: string
+          id?: string
+          item_id?: string
+          order_id?: string | null
+          psid?: string
+          qty?: number
+          session_id?: string
+          settled_at?: string | null
+          status?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "live_claims_tenant_id_comment_id_fkey"
+            columns: ["tenant_id", "comment_id"]
+            isOneToOne: false
+            referencedRelation: "live_comments"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "live_claims_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "live_claims_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "live_claims_tenant_id_item_id_fkey"
+            columns: ["tenant_id", "item_id"]
+            isOneToOne: false
+            referencedRelation: "live_items"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "live_claims_tenant_id_order_id_fkey"
+            columns: ["tenant_id", "order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "live_claims_tenant_id_session_id_fkey"
+            columns: ["tenant_id", "session_id"]
+            isOneToOne: false
+            referencedRelation: "live_sessions"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
+      live_comments: {
+        Row: {
+          author_name: string | null
+          body: string
+          external_id: string
+          id: string
+          outcome: string
+          parsed: Json | null
+          psid: string
+          received_at: string
+          session_id: string
+          tenant_id: string
+        }
+        Insert: {
+          author_name?: string | null
+          body: string
+          external_id: string
+          id?: string
+          outcome?: string
+          parsed?: Json | null
+          psid: string
+          received_at?: string
+          session_id: string
+          tenant_id: string
+        }
+        Update: {
+          author_name?: string | null
+          body?: string
+          external_id?: string
+          id?: string
+          outcome?: string
+          parsed?: Json | null
+          psid?: string
+          received_at?: string
+          session_id?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "live_comments_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "live_comments_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "live_comments_tenant_id_session_id_fkey"
+            columns: ["tenant_id", "session_id"]
+            isOneToOne: false
+            referencedRelation: "live_sessions"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
+      live_items: {
+        Row: {
+          allocated_qty: number | null
+          claim_code: string
+          created_at: string
+          id: string
+          session_id: string
+          sort_order: number
+          tenant_id: string
+          variant_id: string
+        }
+        Insert: {
+          allocated_qty?: number | null
+          claim_code: string
+          created_at?: string
+          id?: string
+          session_id: string
+          sort_order?: number
+          tenant_id: string
+          variant_id: string
+        }
+        Update: {
+          allocated_qty?: number | null
+          claim_code?: string
+          created_at?: string
+          id?: string
+          session_id?: string
+          sort_order?: number
+          tenant_id?: string
+          variant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "live_items_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "live_items_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "live_items_tenant_id_session_id_fkey"
+            columns: ["tenant_id", "session_id"]
+            isOneToOne: false
+            referencedRelation: "live_sessions"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "live_items_tenant_id_variant_id_fkey"
+            columns: ["tenant_id", "variant_id"]
+            isOneToOne: false
+            referencedRelation: "product_variants"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "live_items_tenant_id_variant_id_fkey"
+            columns: ["tenant_id", "variant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_availability"
+            referencedColumns: ["tenant_id", "variant_id"]
+          },
+          {
+            foreignKeyName: "live_items_tenant_id_variant_id_fkey"
+            columns: ["tenant_id", "variant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_variants"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
+      live_sessions: {
+        Row: {
+          channel: string
+          claim_window_minutes: number
+          created_at: string
+          created_by: string | null
+          current_item_id: string | null
+          ended_at: string | null
+          external_ref: string | null
+          id: string
+          location_id: string | null
+          started_at: string | null
+          status: string
+          tenant_id: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          channel?: string
+          claim_window_minutes?: number
+          created_at?: string
+          created_by?: string | null
+          current_item_id?: string | null
+          ended_at?: string | null
+          external_ref?: string | null
+          id?: string
+          location_id?: string | null
+          started_at?: string | null
+          status?: string
+          tenant_id: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          channel?: string
+          claim_window_minutes?: number
+          created_at?: string
+          created_by?: string | null
+          current_item_id?: string | null
+          ended_at?: string | null
+          external_ref?: string | null
+          id?: string
+          location_id?: string | null
+          started_at?: string | null
+          status?: string
+          tenant_id?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "live_sessions_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "live_sessions_current_item_fkey"
+            columns: ["tenant_id", "current_item_id"]
+            isOneToOne: false
+            referencedRelation: "live_items"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "live_sessions_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "live_sessions_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "live_sessions_tenant_id_location_id_fkey"
+            columns: ["tenant_id", "location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
       locations: {
         Row: {
           barangay_code: string | null
@@ -3976,6 +4294,73 @@ export type Database = {
       is_reserved_tenant_slug: { Args: { slug: string }; Returns: boolean }
       is_tenant_member: { Args: { p_tenant_id: string }; Returns: boolean }
       is_valid_tenant_slug: { Args: { slug: string }; Returns: boolean }
+      live_claim_cancel: { Args: { p_claim_id: string }; Returns: Json }
+      live_console: { Args: { p_session_id: string }; Returns: Json }
+      live_expire_claims: {
+        Args: { p_all?: boolean; p_session_id?: string }
+        Returns: Json
+      }
+      live_ingest_comment: {
+        Args: {
+          p_author_name?: string
+          p_body: string
+          p_claims?: Json
+          p_external_id: string
+          p_psid: string
+          p_reason?: string
+          p_session_id: string
+          p_unknown_codes?: Json
+        }
+        Returns: Json
+      }
+      live_ingest_manual: {
+        Args: {
+          p_author_name?: string
+          p_body: string
+          p_claims?: Json
+          p_external_id: string
+          p_psid: string
+          p_reason?: string
+          p_session_id: string
+          p_unknown_codes?: Json
+        }
+        Returns: Json
+      }
+      live_item_add: {
+        Args: {
+          p_allocated?: number
+          p_claim_code: string
+          p_session_id: string
+          p_variant_id: string
+        }
+        Returns: Json
+      }
+      live_session_create: {
+        Args: {
+          p_channel?: string
+          p_external_ref?: string
+          p_tenant_id: string
+          p_title: string
+          p_window_minutes?: number
+        }
+        Returns: Json
+      }
+      live_session_for_ref: {
+        Args: { p_channel: string; p_ref: string }
+        Returns: Json
+      }
+      live_session_update: {
+        Args: {
+          p_current_code?: string
+          p_session_id: string
+          p_status?: string
+        }
+        Returns: Json
+      }
+      live_sessions_list: {
+        Args: { p_limit?: number; p_tenant_id: string }
+        Returns: Json
+      }
       log_integration_attempt: {
         Args: {
           p_attempt?: number
@@ -4204,6 +4589,10 @@ export type Database = {
         Args: { p_items: Json; p_location_id: string; p_tenant_id: string }
         Returns: undefined
       }
+      release_reservation_raw: {
+        Args: { p_items: Json; p_location_id: string; p_tenant_id: string }
+        Returns: undefined
+      }
       reserve_stock: {
         Args: {
           p_items: Json
@@ -4212,6 +4601,10 @@ export type Database = {
           p_reference_type?: string
           p_tenant_id: string
         }
+        Returns: undefined
+      }
+      reserve_stock_raw: {
+        Args: { p_items: Json; p_location_id: string; p_tenant_id: string }
         Returns: undefined
       }
       resolve_shipping_zone: {
