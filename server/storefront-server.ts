@@ -32,6 +32,7 @@ import { CART_COOKIE, cartCookie, isSecureRequest } from './cookies'
 import { serveCourierRoutes } from './courier-routes'
 import { serveXenditWebhook } from './payment-webhook'
 import { serveLiveWebhook } from './live-routes'
+import { serveSocialRoutes, serveSocialWebhook } from './social-routes'
 import { serveCourierWebhook } from './tracking'
 import { readSupabaseConfig, rpc, type SupabaseConfig } from './supabase-rpc'
 
@@ -300,6 +301,14 @@ async function handle(
   // surface routing for the same reason: this arrives on the platform's own
   // hostname, not on any seller's store.
   if (await serveLiveWebhook(request, response, url, storeRootUrl(url))) return
+
+  // Page comments and DMs. A separate endpoint from the live webhook because the
+  // two do different things with the same shape of payload — one reserves stock
+  // against a session's board, the other answers a question under a photo.
+  if (await serveSocialWebhook(request, response, url, storeRootUrl(url))) return
+
+  // Connecting a Page, and the OAuth redirect Facebook sends the seller back to.
+  if (await serveSocialRoutes(request, response, url, storeRootUrl(url))) return
 
   // `.localhost` subdomains resolve to 127.0.0.1 in every modern browser, so
   // `rheas-finds.localhost:5174` exercises the real subdomain path in dev.

@@ -705,6 +705,82 @@ export const en = {
     errorDuplicateRef: 'There is already a live session listening to that video.',
     errorUnknown: 'Something went wrong. Please try again.',
   },
+  inbox: {
+    // Seller-facing. "Inbox", "Page", "message" and the Facebook tag names stay in
+    // English in both locales — they are the words on Facebook's own screens, and
+    // a seller matching what they see there is a seller who can act on it.
+    title: 'Inbox',
+    subtitle: 'Comments and messages, answered while you are doing something else.',
+    settingsAction: 'Setup',
+    threadsTitle: 'Conversations',
+    empty: 'No conversations yet. They will appear here as soon as someone messages your Page.',
+    orderCount_one: '{{count}} order',
+    orderCount_other: '{{count}} orders',
+
+    windowNone: 'Cannot message',
+    windowClosed: 'Window closed',
+    windowHours_one: '{{count}}h left',
+    windowHours_other: '{{count}}h left',
+    windowMinutes_one: '{{count}} min left',
+    windowMinutes_other: '{{count}} min left',
+    windowClosedHint: 'It has been over 24 hours since they wrote — pick a tag to reply.',
+    windowNeverHint: 'They have never messaged your Page, so you cannot start a conversation.',
+
+    backAction: 'Inbox',
+    conversationTitle: 'Conversation',
+    replyLabel: 'Your reply',
+    replyPlaceholder: 'Type your reply…',
+    sendAction: 'Send',
+    sending: 'Sending…',
+    notDelivered: 'not delivered',
+
+    tagLabel: 'Message tag',
+    tagNone: 'Choose a tag',
+    tagPostPurchase: 'POST_PURCHASE_UPDATE — about an order they already placed',
+    tagConfirmedEvent: 'CONFIRMED_EVENT_UPDATE — about something they signed up for',
+    tagAccount: 'ACCOUNT_UPDATE — a change to their account',
+    tagHumanAgent: 'HUMAN_AGENT — you are replying personally, within 7 days',
+    tagHint:
+      'Only for the reason the tag names. Using one to promote something can cost your Page the ability to message anyone.',
+
+    rulesTitle: 'Auto-replies',
+    rulesSubtitle: 'The questions you answer forty times a day, answered for you.',
+    ruleKeywordLabel: 'When someone says',
+    ruleKeywordPlaceholder: 'magkano',
+    ruleBodyLabel: 'Reply with',
+    ruleBodyPlaceholder: 'Nasa link po ang presyo: {{storeUrl}}',
+    ruleBodyHint: '{{storeUrl}} becomes your store link, {{storeName}} your store name.',
+    ruleAddAction: 'Add rule',
+    ruleOn: 'Turn on',
+    ruleOff: 'Turn off',
+    ruleDelete: 'Delete rule',
+    tryLabel: 'Try it',
+    tryPlaceholder: 'magkano po ito?',
+    tryNoMatch: 'No rule matches that — nothing would be sent.',
+
+    connectTitle: 'Facebook Page',
+    connectSubtitle: 'Connect a Page and Selld answers its comments and messages.',
+    connectNone: 'No Page connected yet.',
+    connectAction: 'Connect a Page',
+    connectAnotherAction: 'Connect another Page',
+    connectAnother: 'Connect another Page',
+    connectIg: 'Instagram linked',
+    connectExpired: 'Reconnect needed',
+    connectNotSubscribed: 'Not receiving comments',
+    disconnectAction: 'Disconnect',
+    connectHint:
+      'You will be sent to Facebook to choose which Page. Selld only asks for what it needs to read comments and reply.',
+
+    errorWindowClosed: 'It has been over 24 hours since they messaged you. Pick a tag, or wait for them to write again.',
+    errorNeverMessaged: 'They have never messaged your Page, so you cannot start a conversation.',
+    errorTagNeedsHuman: 'HUMAN_AGENT is only for a reply you are typing yourself.',
+    errorNoPage: 'No Facebook Page is connected to this store.',
+    errorNotConfigured: 'Messenger is not set up on this server yet.',
+    errorNotAllowed: 'You do not have permission to do that for this store.',
+    errorBadKeyword: 'A keyword is between 1 and 60 characters.',
+    errorBadBody: 'A reply is between 1 and 900 characters.',
+    errorUnknown: 'Something went wrong. Please try again.',
+  },
   cod: {
     // Seller-facing. "COD" and "remittance" stay in English in both locales —
     // they are the words on the courier's own portal and on the statement file.

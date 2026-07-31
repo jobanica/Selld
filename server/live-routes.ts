@@ -143,6 +143,8 @@ interface LiveSessionRef {
   status: string
   currentCode: string | null
   codes: string[]
+  /** The store's connected Facebook Page, if it has one. Phase 14. */
+  pageId?: string | null
 }
 
 interface IngestOutcome {
@@ -185,7 +187,7 @@ export async function ingestComment(
   // answer thirty times an evening.
   for (const claim of result.claims ?? []) {
     if (claim.outcome !== 'reserved' || claim.cartToken === undefined) continue
-    await notifyClaimant(comment.psid, claim, storeOrigin).catch(() => {
+    await notifyClaimant(comment.psid, claim, storeOrigin, session).catch(() => {
       // A failed DM must not undo a held claim. The stock is theirs either way,
       // and the operator console shows the link.
     })
@@ -207,21 +209,36 @@ async function notifyClaimant(
   psid: string,
   claim: { code: string; qty?: number; cartToken?: string },
   storeOrigin: string,
+  session: LiveSessionRef,
 ): Promise<void> {
   registerMessengerProviders()
-  const provider = messengerRegistry.find('log') ?? messengerRegistry.all()[0]
-  if (provider === undefined) return
 
-  await provider.send({
+  const message = {
     psid,
-    purpose: 'live_claim',
+    pageId: session.pageId ?? null,
+    tenantId: session.tenantId,
+    purpose: 'live_claim' as const,
     // Stable per claim, so a webhook redelivery that somehow got this far still
     // cannot double-send.
     idempotencyKey: `${claim.cartToken}`,
     text:
       `Yours! ${claim.code} x${claim.qty ?? 1} is reserved for you. ` +
       `Complete it here: ${storeOrigin}/live/claim/${claim.cartToken}`,
-  })
+  }
+
+  // Phase 14 registered a provider that can actually send this. It reports
+  // `skipped` — not `failed` — when the store has connected no Page, which is the
+  // signal to fall back to logging rather than to drop the message: a store on its
+  // first live sale has no Page connected and its claims must still work.
+  const facebook = messengerRegistry.find('facebook')
+  if (facebook !== undefined) {
+    const result = await facebook.send(message)
+    if (result.status !== 'skipped') return
+  }
+
+  const fallback = messengerRegistry.find('log') ?? messengerRegistry.all()[0]
+  if (fallback === undefined) return
+  await fallback.send(message)
 }
 
 /**

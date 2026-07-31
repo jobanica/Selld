@@ -5,8 +5,7 @@ Build one phase per session, in order. The full roadmap is in
 [`docs/build-spec.md`](docs/build-spec.md); who we're building for is in
 [`docs/avatar.md`](docs/avatar.md).
 
-**Current state: phase 13 complete.** Next up is phase 14 (Messenger & social
-integration).
+**Current state: phase 14 complete.** Next up is phase 15 (customers & CRM).
 
 ---
 
@@ -190,6 +189,23 @@ What follows from that:
   destination city — and nothing else. No street, no phone, no surname, no totals,
   no line items. Both the tenancy suite and a CI step assert against a real order
   that none of those appear in the payload.
+- **Phase 14 adds a fourth constraint that is not a security boundary at all:
+  Facebook's 24-hour messaging window.** It is a *compliance* one, and the penalty
+  for getting it wrong is the page's messaging permission — which for a seller
+  whose business runs through Messenger is the business. So it lives in the
+  database rather than in an `if` in one handler: `message_send_allowed()` decides,
+  `record_outbound_message()` refuses to record a send it should not have made, and
+  every path asks **before** it sends. Asking afterwards is asking whether a message
+  you have already delivered was allowed. The one send that legitimately needs no
+  window is a *private reply to a comment* — the person just commented publicly —
+  and it goes through `record_comment_dm()`, which takes a real comment row as its
+  evidence and never touches `last_inbound_at`.
+- **A page access token is the most dangerous secret in the schema**: it can post
+  as the seller, read their inbox and message their customers. `social_accounts`
+  therefore has RLS on and *no policy at all*, no `select` grant, and the token
+  encrypted under a key that lives in the server's environment.
+  `social_accounts_safe` derives "connected", "expired" and "subscribed" without
+  carrying it, and a CI step asserts no client role can reach it.
 - **A `SECURITY DEFINER` function granted to `authenticated` is not tenant-scoped.**
   The definer bypasses the RLS on the tables it reads, so the *function* has to
   check. `sms_credit_balance(tenant_id)` shipped without that check and returned any
@@ -234,7 +250,7 @@ src/
   app/          ← dashboard (authenticated seller surface)
   storefront/   ← public buyer surface, own perf budget
   features/     ← feature slices; may import from core and lib
-    address/ auth/ catalog/ inventory/ onboarding/ tenancy/
+    address/ auth/ catalog/ cod/ inbox/ inventory/ live/ onboarding/ orders/ tenancy/
   lib/          ← money, phone, psgc, i18n, time, supabase, tenant
   components/ui ← shadcn/ui primitives
 ```
@@ -374,6 +390,13 @@ one new file plus one registry line, and zero lines of order logic.
   Use `errorMessage()` from `src/lib/supabase/errors.ts`. This shipped twice — in
   `describeStockError` and `describeShippingError` — because a test that builds
   `new Error(realMessage)` passes happily. Model the error as a plain object.
+- **`revoke ... from public` is easy to forget on a screen that "is obviously
+  seller-only".** Phase 12's COD functions were granted to `authenticated` and never
+  revoked from PUBLIC, so `anon` could call every one of them; each checks
+  membership internally, so nothing leaked, but CI's own list said they must not be
+  anon-callable and the check had been red since. Found in phase 14 while adding
+  entries to that list. A grant to `authenticated` reads like a restriction and is
+  not one.
 - **Never run `prettier` on this repo.** There is no prettier config and no prettier
   dependency; style is convention (no semicolons, single quotes) and eslint does not
   enforce either. `npx prettier --write` silently reformats a file to prettier's
@@ -488,6 +511,16 @@ one new file plus one registry line, and zero lines of order logic.
   `*.localhost`.** Both silently send a test to the wrong surface — a request meant
   for a store arrives as `127.0.0.1` and renders the dashboard shell. Drive
   multi-tenant HTTP checks through `curl -H 'Host: …'`.
+- **Facebook answers 200 with an `error` object far more often than it answers
+  4xx**, and the subcode arrives as `error_subcode`, not `subcode`. Checking
+  `response.ok` alone reads a policy refusal as a successful send, and the seller
+  finds out when nobody has replied to them for a week. `classifyGraphError()` is
+  the only place that decides, and only `transient` is ever retried — retrying a
+  policy refusal is how a page's messaging permission goes away.
+- **A `set local role anon` does not clear the JWT claims.** `is_tenant_member()`
+  reads `auth.uid()`, so a tenancy assertion written after a `tests.login()` keeps
+  answering as that seller while claiming to be a buyer. `tests.logout()` first, or
+  the assertion passes for the wrong reason.
 - **`pnpm db:test` does not apply migrations.** It runs the SQL suites against
   whatever is already in the database, so editing a migration and re-running the
   tests proves nothing about the edit. Sabotage a function with

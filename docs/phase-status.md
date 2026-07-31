@@ -1386,3 +1386,109 @@ step so the next composite FK cannot repeat it.
 
 **Gate:** `pnpm verify` (458 tests), `pnpm db:test` (476 assertions),
 `pnpm db:test:concurrency`. All 18 migrations apply from scratch on PG 17.6.
+
+---
+
+## Phase 14 — Messenger & social integration
+
+**Done when:** a comment on any post triggers a DM with the store link within 5
+seconds.
+
+**Measured** over the real webhook on the real server, against a fake Graph API
+answering with 120 ms of latency per call — so the number below includes the
+signature check, the account lookup, the comment insert, the keyword match and the
+Send API round trip:
+
+| | Result |
+|---|---|
+| Comment received → DM sent | **57 ms** (bar: 5 000 ms) |
+| Whole webhook request | 356 ms |
+| A 40-comment burst on one post | 1.1 s, worst buyer waited **836 ms** |
+| DMs sent in that burst | 26 of 26 questions; the 14 "ang ganda!" got none |
+| Account lookups for those 40 | 1 |
+| Facebook redelivering the comment | 0 sends, 1 comment row |
+| Public reply | sent, and always *after* the DM |
+| Page access token in a URL | never — `Authorization: Bearer`, asserted |
+
+### What shipped
+
+- **`social_accounts`**, with the page access token encrypted at rest under a key
+  held in the server's environment. No `select` grant, no policy at all: the
+  `social_accounts_safe` view derives "is this connected", "has it expired", "is it
+  actually subscribed" without ever carrying the secret.
+- **Facebook OAuth**, start to finish: a signed `state` minted only after
+  `has_tenant_role(tenant, 'admin')` passes under the seller's own token, the code
+  exchange, the long-lived upgrade, `/me/accounts`, and `subscribed_apps` — because
+  a page that is connected but not subscribed looks perfectly fine and is
+  completely silent.
+- **The comment play.** A comment with a keyword gets a private reply carrying the
+  store link, then a short public "sent you a DM po" for everyone else reading the
+  thread. The private reply is its own Facebook affordance and needs no open
+  messaging window — the person just commented publicly — which is exactly why it
+  is the one send this phase leans on.
+- **A unified inbox** with the 24-hour window on every row, in hours, sorted so the
+  closing conversations are answered first. Replies go through the server, never
+  the browser, because the browser must never hold a page token.
+- **Keyword auto-replies** in the words PH buyers actually type — `magkano`,
+  `pila`, `price`, `order`, `cod`, `store`, `link` — seeded for every store, old
+  and new, and matched on **whole words** in Postgres (`\m`…`\M`). A `contains`
+  rule for `cod` fires on `codigo`, and a seller who wrote one rule gets a robot
+  answering everything.
+- **Customer auto-linking by PSID**, so a message from a 16-digit number shows up
+  as a person with an order history.
+
+### The rule that is not ours to bend
+
+Facebook lets a page send a **standard** message only within 24 hours of the
+person's last message. Outside it a send needs a *message tag*, the tags are narrow,
+and misusing one costs the page its messaging permission — which for a seller whose
+business runs through Messenger is the business.
+
+So the window lives in the database, not in the application:
+`message_send_allowed()` is the decision, `record_outbound_message()` refuses to
+record a send it should not have made, and every path asks **before** it sends
+rather than after. The proof drives all of it: standard inside 24 hours,
+`window_closed` outside, `POST_PURCHASE_UPDATE` allowed, an invented tag refused,
+`HUMAN_AGENT` refused to an automation and allowed to a person, and a page never
+able to open a conversation with someone who has never written to it.
+
+### Notable findings
+
+| Symptom | Cause |
+|---|---|
+| Phase 12's COD and returns functions were callable by `anon` | Granted to `authenticated` and never revoked from **PUBLIC**, which is Postgres's default grantee. CI's own list named them, so the check was red rather than green — found while adding this phase's entries to it. Every one checks membership internally, so nothing leaked; closed anyway. |
+| The 40th commenter on a popular post waited 7 s | Comments were handled one at a time, at two Graph round trips each. Bounded to eight at a time; the same burst now finishes in 1.1 s. Bounded rather than unbounded, because being rate-limited costs every seller on the deployment. |
+| The OAuth callback connected nothing | `social_account_connect` checked `has_tenant_role`, and the callback arrives as a top-level navigation with no session at all. The authorisation is one step earlier, carried by the signed `state`; the function is service-role only, like `set_courier_credentials`. |
+| A policy refusal would have been retried | `withRetry` retries anything it does not recognise, which is right for a network blip and is how a page that has been told "you may not send this" says it again on a backoff curve. Only `transient` is retried now. |
+| `subcode` read nothing | Facebook sends `error_subcode`. Reading the wrong key degrades every "outside the window" refusal to whatever the top-level code happened to be — sometimes a transient one. |
+| A phase-13 assertion failed about half the time | Its fixture picked a variant with `select ... limit 1` and no `ORDER BY`; on the runs that picked one the order tests had already reserved, the first claim came back `sold_out`. It builds its own product now. |
+| An anon assertion passed for the wrong reason | `set local role anon` does not clear the JWT claims, so `is_tenant_member` kept answering as the seller. `tests.logout()` first. |
+
+### Deliberately deferred
+
+- **Instagram** is stored (`ig_user_id`, captured at connect time) and not yet
+  ingested. IG comments arrive on a different webhook field with a different
+  payload, and guessing at it would be a second parser nobody has driven.
+- **Attachments** are recorded on inbound messages and cannot be sent. A seller
+  sending a photo back needs an upload endpoint, which is a phase of its own.
+- **No message-tag scheduler.** Tags are offered to a person typing in the inbox;
+  automated tagged sends (a shipping update to someone outside the window) belong
+  with the job runner phases 10, 11 and 13 are also waiting on.
+- **One page per store.** The schema allows several and the UI connects several;
+  nothing yet lets a seller choose *which* page a reply goes out from, because
+  every path so far is answering something that arrived on a known page.
+
+### Still needed outside the repo
+
+- `FB_APP_ID` and `FB_APP_SECRET` from a Facebook app with `pages_messaging`,
+  `pages_manage_metadata`, `pages_read_engagement` and `pages_manage_engagement`
+  approved, plus `SOCIAL_WEBHOOK_SECRET` and `SOCIAL_TOKEN_KEY` in the server
+  environment.
+- The webhook URL `/api/webhooks/social/{SOCIAL_WEBHOOK_SECRET}` registered on the
+  app with the `feed`, `messages` and `messaging_postbacks` fields, and
+  `FB_WEBHOOK_VERIFY_TOKEN` matching what is configured there.
+- `SELLD_PUBLIC_URL` when the server sits behind a proxy that rewrites the host:
+  Facebook compares `redirect_uri` byte for byte.
+
+**Gate:** `pnpm verify` (476 tests), `pnpm db:test` (528 assertions),
+`pnpm db:test:concurrency`. All 19 migrations apply from scratch on PG 17.6.

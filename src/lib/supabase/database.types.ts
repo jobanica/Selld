@@ -43,6 +43,60 @@ export type Database = {
   }
   public: {
     Tables: {
+      auto_replies: {
+        Row: {
+          body: string
+          channel: string
+          created_at: string
+          id: string
+          is_active: boolean
+          keyword: string
+          match_type: string
+          priority: number
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          body: string
+          channel?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          keyword: string
+          match_type?: string
+          priority?: number
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          body?: string
+          channel?: string
+          created_at?: string
+          id?: string
+          is_active?: boolean
+          keyword?: string
+          match_type?: string
+          priority?: number
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "auto_replies_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "auto_replies_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       buyer_risk_contributions: {
         Row: {
           delivered_count: number
@@ -1424,6 +1478,184 @@ export type Database = {
           },
         ]
       }
+      message_tags: {
+        Row: {
+          automation_allowed: boolean
+          description: string
+          tag: string
+          window_hours: number | null
+        }
+        Insert: {
+          automation_allowed?: boolean
+          description: string
+          tag: string
+          window_hours?: number | null
+        }
+        Update: {
+          automation_allowed?: boolean
+          description?: string
+          tag?: string
+          window_hours?: number | null
+        }
+        Relationships: []
+      }
+      message_threads: {
+        Row: {
+          created_at: string
+          customer_id: string | null
+          id: string
+          last_inbound_at: string | null
+          last_message_at: string | null
+          last_outbound_at: string | null
+          last_snippet: string | null
+          participant_name: string | null
+          platform: string
+          psid: string
+          social_account_id: string
+          status: string
+          tenant_id: string
+          unread_count: number
+        }
+        Insert: {
+          created_at?: string
+          customer_id?: string | null
+          id?: string
+          last_inbound_at?: string | null
+          last_message_at?: string | null
+          last_outbound_at?: string | null
+          last_snippet?: string | null
+          participant_name?: string | null
+          platform: string
+          psid: string
+          social_account_id: string
+          status?: string
+          tenant_id: string
+          unread_count?: number
+        }
+        Update: {
+          created_at?: string
+          customer_id?: string | null
+          id?: string
+          last_inbound_at?: string | null
+          last_message_at?: string | null
+          last_outbound_at?: string | null
+          last_snippet?: string | null
+          participant_name?: string | null
+          platform?: string
+          psid?: string
+          social_account_id?: string
+          status?: string
+          tenant_id?: string
+          unread_count?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "message_threads_tenant_id_customer_id_fkey"
+            columns: ["tenant_id", "customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "message_threads_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_threads_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_threads_tenant_id_social_account_id_fkey"
+            columns: ["tenant_id", "social_account_id"]
+            isOneToOne: false
+            referencedRelation: "social_accounts"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "message_threads_tenant_id_social_account_id_fkey"
+            columns: ["tenant_id", "social_account_id"]
+            isOneToOne: false
+            referencedRelation: "social_accounts_safe"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
+      messages: {
+        Row: {
+          attachments: Json | null
+          body: string | null
+          created_at: string
+          direction: string
+          error: string | null
+          external_id: string | null
+          id: string
+          sent_at: string
+          source: string
+          status: string
+          tag: string | null
+          tenant_id: string
+          thread_id: string
+        }
+        Insert: {
+          attachments?: Json | null
+          body?: string | null
+          created_at?: string
+          direction: string
+          error?: string | null
+          external_id?: string | null
+          id?: string
+          sent_at?: string
+          source?: string
+          status?: string
+          tag?: string | null
+          tenant_id: string
+          thread_id: string
+        }
+        Update: {
+          attachments?: Json | null
+          body?: string | null
+          created_at?: string
+          direction?: string
+          error?: string | null
+          external_id?: string | null
+          id?: string
+          sent_at?: string
+          source?: string
+          status?: string
+          tag?: string | null
+          tenant_id?: string
+          thread_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "messages_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "messages_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "messages_tenant_id_thread_id_fkey"
+            columns: ["tenant_id", "thread_id"]
+            isOneToOne: false
+            referencedRelation: "message_threads"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
       order_counters: {
         Row: {
           next_number: number
@@ -2112,6 +2344,83 @@ export type Database = {
           value?: Json
         }
         Relationships: []
+      }
+      post_comments: {
+        Row: {
+          author_name: string | null
+          body: string
+          comment_id: string
+          created_at: string
+          id: string
+          parent_id: string | null
+          post_id: string
+          private_reply_error: string | null
+          psid: string
+          replied_privately: boolean
+          replied_publicly: boolean
+          social_account_id: string
+          tenant_id: string
+        }
+        Insert: {
+          author_name?: string | null
+          body: string
+          comment_id: string
+          created_at?: string
+          id?: string
+          parent_id?: string | null
+          post_id: string
+          private_reply_error?: string | null
+          psid: string
+          replied_privately?: boolean
+          replied_publicly?: boolean
+          social_account_id: string
+          tenant_id: string
+        }
+        Update: {
+          author_name?: string | null
+          body?: string
+          comment_id?: string
+          created_at?: string
+          id?: string
+          parent_id?: string | null
+          post_id?: string
+          private_reply_error?: string | null
+          psid?: string
+          replied_privately?: boolean
+          replied_publicly?: boolean
+          social_account_id?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "post_comments_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "post_comments_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "post_comments_tenant_id_social_account_id_fkey"
+            columns: ["tenant_id", "social_account_id"]
+            isOneToOne: false
+            referencedRelation: "social_accounts"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "post_comments_tenant_id_social_account_id_fkey"
+            columns: ["tenant_id", "social_account_id"]
+            isOneToOne: false
+            referencedRelation: "social_accounts_safe"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
       }
       product_images: {
         Row: {
@@ -3278,6 +3587,79 @@ export type Database = {
           },
         ]
       }
+      social_accounts: {
+        Row: {
+          connected_at: string
+          connected_by: string | null
+          id: string
+          ig_user_id: string | null
+          is_active: boolean
+          page_id: string
+          page_name: string | null
+          platform: string
+          scopes: string[]
+          tenant_id: string
+          token_encrypted: string | null
+          token_expires_at: string | null
+          updated_at: string
+          webhook_subscribed: boolean
+        }
+        Insert: {
+          connected_at?: string
+          connected_by?: string | null
+          id?: string
+          ig_user_id?: string | null
+          is_active?: boolean
+          page_id: string
+          page_name?: string | null
+          platform: string
+          scopes?: string[]
+          tenant_id: string
+          token_encrypted?: string | null
+          token_expires_at?: string | null
+          updated_at?: string
+          webhook_subscribed?: boolean
+        }
+        Update: {
+          connected_at?: string
+          connected_by?: string | null
+          id?: string
+          ig_user_id?: string | null
+          is_active?: boolean
+          page_id?: string
+          page_name?: string | null
+          platform?: string
+          scopes?: string[]
+          tenant_id?: string
+          token_encrypted?: string | null
+          token_expires_at?: string | null
+          updated_at?: string
+          webhook_subscribed?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "social_accounts_connected_by_fkey"
+            columns: ["connected_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "social_accounts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "social_accounts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       stock_movements: {
         Row: {
           created_at: string
@@ -3809,6 +4191,69 @@ export type Database = {
         }
         Relationships: []
       }
+      social_accounts_safe: {
+        Row: {
+          connected_at: string | null
+          has_token: boolean | null
+          id: string | null
+          ig_user_id: string | null
+          is_active: boolean | null
+          page_id: string | null
+          page_name: string | null
+          platform: string | null
+          scopes: string[] | null
+          tenant_id: string | null
+          token_expired: boolean | null
+          token_expires_at: string | null
+          webhook_subscribed: boolean | null
+        }
+        Insert: {
+          connected_at?: string | null
+          has_token?: never
+          id?: string | null
+          ig_user_id?: string | null
+          is_active?: boolean | null
+          page_id?: string | null
+          page_name?: string | null
+          platform?: string | null
+          scopes?: string[] | null
+          tenant_id?: string | null
+          token_expired?: never
+          token_expires_at?: string | null
+          webhook_subscribed?: boolean | null
+        }
+        Update: {
+          connected_at?: string | null
+          has_token?: never
+          id?: string | null
+          ig_user_id?: string | null
+          is_active?: boolean | null
+          page_id?: string | null
+          page_name?: string | null
+          platform?: string | null
+          scopes?: string[] | null
+          tenant_id?: string | null
+          token_expired?: never
+          token_expires_at?: string | null
+          webhook_subscribed?: boolean | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "social_accounts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "social_accounts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       storefront_availability: {
         Row: {
           in_stock: boolean | null
@@ -4113,6 +4558,24 @@ export type Database = {
         }
         Returns: undefined
       }
+      auto_reply_for: {
+        Args: {
+          p_channel?: string
+          p_root_url?: string
+          p_tenant_id: string
+          p_text: string
+        }
+        Returns: Json
+      }
+      auto_reply_for_raw: {
+        Args: {
+          p_channel?: string
+          p_root_url?: string
+          p_tenant_id: string
+          p_text: string
+        }
+        Returns: Json
+      }
       available_stock: {
         Args: { p_on_hand: number; p_reserved: number }
         Returns: number
@@ -4275,6 +4738,16 @@ export type Database = {
         }
       }
       current_tenant_id: { Args: never; Returns: string }
+      default_auto_replies: {
+        Args: never
+        Returns: {
+          body: string
+          channel: string
+          keyword: string
+          match_type: string
+          priority: number
+        }[]
+      }
       default_sms_templates: {
         Args: never
         Returns: {
@@ -4291,6 +4764,15 @@ export type Database = {
         Returns: boolean
       }
       image_widths_are_sane: { Args: { p_widths: number[] }; Returns: boolean }
+      inbox_mark_read: { Args: { p_thread_id: string }; Returns: undefined }
+      inbox_thread: {
+        Args: { p_limit?: number; p_thread_id: string }
+        Returns: Json
+      }
+      inbox_threads: {
+        Args: { p_limit?: number; p_status?: string; p_tenant_id: string }
+        Returns: Json
+      }
       is_reserved_tenant_slug: { Args: { slug: string }; Returns: boolean }
       is_tenant_member: { Args: { p_tenant_id: string }; Returns: boolean }
       is_valid_tenant_slug: { Args: { slug: string }; Returns: boolean }
@@ -4375,6 +4857,14 @@ export type Database = {
           p_tenant_id: string
         }
         Returns: undefined
+      }
+      message_send_allowed: {
+        Args: { p_automated?: boolean; p_tag?: string; p_thread_id: string }
+        Returns: Json
+      }
+      message_send_allowed_raw: {
+        Args: { p_automated?: boolean; p_tag?: string; p_thread_id: string }
+        Returns: Json
       }
       my_tenants: {
         Args: never
@@ -4479,6 +4969,32 @@ export type Database = {
         Args: { p_amount?: number; p_note?: string; p_order_id: string }
         Returns: Json
       }
+      record_comment_dm: {
+        Args: { p_body: string; p_comment_row: string; p_external_id?: string }
+        Returns: string
+      }
+      record_comment_reply: {
+        Args: {
+          p_comment_row: string
+          p_error?: string
+          p_privately: boolean
+          p_publicly: boolean
+        }
+        Returns: undefined
+      }
+      record_inbound_message: {
+        Args: {
+          p_account_id: string
+          p_attachments?: Json
+          p_body: string
+          p_external_id: string
+          p_name?: string
+          p_psid: string
+          p_root_url?: string
+          p_sent_at?: string
+        }
+        Returns: Json
+      }
       record_manual_payment: {
         Args: {
           p_amount: number
@@ -4503,6 +5019,18 @@ export type Database = {
         }
         Returns: boolean
       }
+      record_outbound_message: {
+        Args: {
+          p_body: string
+          p_error?: string
+          p_external_id?: string
+          p_source?: string
+          p_status?: string
+          p_tag?: string
+          p_thread_id: string
+        }
+        Returns: Json
+      }
       record_payment_event: {
         Args: {
           p_amount: number
@@ -4514,6 +5042,19 @@ export type Database = {
           p_provider: string
           p_provider_ref: string
           p_status: string
+        }
+        Returns: Json
+      }
+      record_post_comment: {
+        Args: {
+          p_account_id: string
+          p_author_name?: string
+          p_body: string
+          p_comment_id: string
+          p_parent_id?: string
+          p_post_id: string
+          p_psid: string
+          p_root_url?: string
         }
         Returns: Json
       }
@@ -4642,6 +5183,16 @@ export type Database = {
         }
         Returns: undefined
       }
+      set_social_page_token: {
+        Args: {
+          p_account_id: string
+          p_expires_at?: string
+          p_key: string
+          p_subscribed?: boolean
+          p_token: string
+        }
+        Returns: undefined
+      }
       set_stock_level: {
         Args: {
           p_location_id: string
@@ -4695,6 +5246,33 @@ export type Database = {
         Args: { p_event: string; p_order_id: string; p_root_url: string }
         Returns: Json
       }
+      social_account_connect: {
+        Args: {
+          p_ig_user_id?: string
+          p_page_id: string
+          p_page_name?: string
+          p_platform: string
+          p_scopes?: string[]
+          p_tenant_id: string
+        }
+        Returns: string
+      }
+      social_account_disconnect: {
+        Args: { p_account_id: string }
+        Returns: undefined
+      }
+      social_account_for_page: {
+        Args: { p_page_id: string; p_platform: string }
+        Returns: Json
+      }
+      social_account_for_thread: {
+        Args: { p_thread_id: string }
+        Returns: Json
+      }
+      social_page_token: {
+        Args: { p_key: string; p_page_id: string; p_platform: string }
+        Returns: string
+      }
       storage_path_tenant_id: { Args: { p_name: string }; Returns: string }
       storefront_home: {
         Args: {
@@ -4746,6 +5324,10 @@ export type Database = {
       tenant_role_rank: {
         Args: { role: Database["public"]["Enums"]["tenant_role"] }
         Returns: number
+      }
+      tenant_store_url: {
+        Args: { p_root_url?: string; p_tenant_id: string }
+        Returns: string
       }
       update_rts_cost: {
         Args: { p_return_cost: number; p_rts_id: string }

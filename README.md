@@ -5,7 +5,7 @@
 Multi-tenant ecommerce + order operations platform for Philippine social sellers.
 Working name: **Selld** (`selld.ph` / `selld.store`).
 
-> **Status: phase 13 (Live selling capture) complete.** Next: phase 14, Messenger & social integration.
+> **Status: phase 14 (Messenger & social integration) complete.** Next: phase 15, customers & CRM.
 > See [`docs/phase-status.md`](docs/phase-status.md).
 
 ---
@@ -128,7 +128,7 @@ naive UTC date splits one Manila morning across two buckets.
 **Tenant isolation is enforced in the database, not the client.** Every
 tenant-scoped policy funnels through `is_tenant_member(tenant_id)`, and
 [`supabase/tests/tenancy-isolation.sql`](supabase/tests/tenancy-isolation.sql)
-proves cross-tenant reads and writes return nothing — 355 assertions, run in CI on
+proves cross-tenant reads and writes return nothing — 528 assertions, run in CI on
 every PR. The suite is verified by sabotage: break RLS and it fails. Read the
 "Writing a tenant-scoped table" section of [`CLAUDE.md`](CLAUDE.md) before adding
 a table.
@@ -143,6 +143,14 @@ separately with real parallel connections.
 
 **Providers are interfaces first.** Adding a fifth courier should touch one new
 file and one registry line, and zero lines of order logic.
+
+**Facebook's 24-hour messaging window is enforced in the database.** A page may
+send a standard message only within 24 hours of the person's last message, and
+misusing a message tag to get around that costs the page its ability to message
+anyone. So `message_send_allowed()` is the single decision point, every path asks
+before it sends rather than after, and
+[`supabase/tests/tenancy-isolation.sql`](supabase/tests/tenancy-isolation.sql)
+drives all six ways it can say no.
 
 ## Documentation
 

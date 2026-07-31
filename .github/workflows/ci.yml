@@ -289,11 +289,19 @@ jobs:
                 'record_shipment_event', 'record_tracking_sms', 'sms_credit_move',
                 'sms_render_for_order', 'shipments_to_poll', 'sms_credit_balance_raw',
                 'cod_import_statement', 'cod_post_remittance', 'cod_discard_remittance',
-                'cod_reconciliation', 'record_rts', 'update_rts_cost',
+                'cod_reconciliation', 'cod_remittance_summary', 'cod_remittance_lines',
+                'record_rts', 'update_rts_cost', 'rts_report',
                 'buyer_risk_set_flag', 'buyer_risk_lookup',
                 'buyer_risk_hash', 'buyer_risk_contribute', 'buyer_risk_refresh',
                 'live_ingest_comment', 'live_session_for_ref', 'live_expire_claims',
-                'reserve_stock_raw', 'release_reservation_raw'
+                'reserve_stock_raw', 'release_reservation_raw',
+                'social_page_token', 'set_social_page_token', 'social_account_connect',
+                'social_account_for_page', 'social_account_for_thread',
+                'record_inbound_message', 'record_outbound_message',
+                'record_post_comment', 'record_comment_reply', 'record_comment_dm',
+                'message_send_allowed_raw', 'auto_reply_for_raw', 'tenant_store_url',
+                'inbox_threads', 'inbox_thread', 'inbox_mark_read',
+                'message_send_allowed', 'auto_reply_for', 'social_account_disconnect'
               ]
               loop
                 if exists (
@@ -345,7 +353,12 @@ jobs:
                 'record_shipment', 'record_booking_failure',
                 'record_shipment_event', 'record_tracking_sms', 'sms_credit_move',
                 'sms_render_for_order', 'shipments_to_poll',
-                'live_ingest_comment', 'live_session_for_ref', 'live_expire_claims'
+                'live_ingest_comment', 'live_session_for_ref', 'live_expire_claims',
+                'social_page_token', 'set_social_page_token', 'social_account_connect',
+                'social_account_for_page', 'social_account_for_thread',
+                'record_inbound_message', 'record_outbound_message',
+                'record_post_comment', 'record_comment_reply', 'record_comment_dm',
+                'message_send_allowed_raw'
               ]
               loop
                 if exists (
@@ -460,6 +473,62 @@ jobs:
                 raise exception 'public_tracking() leaks: %', array_to_string(v_leaks, ', ');
               end if;
               raise notice 'public tracking payload is safe to hand a stranger OK';
+              raise exception 'rollback';
+            exception when others then
+              if sqlerrm <> 'rollback' then raise; end if;
+            end
+            \$\$;
+          "
+
+      # A page access token can post as the seller, read their inbox and message
+      # their customers, so it is the most dangerous secret in the schema. Three
+      # properties, asserted against a real stored token rather than by reading the
+      # source: no role can select the column, the safe view does not carry it, and
+      # the decrypt function is not callable by anyone with a session.
+      - name: A page access token is unreadable by any client role
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h 127.0.0.1 -p 54322 -U postgres -v ON_ERROR_STOP=1 -c "
+            do \$\$
+            declare
+              v_tenant  uuid;
+              v_account uuid;
+              v_leaks   text[] := '{}';
+              r         text;
+            begin
+              insert into public.tenants (name, slug, status)
+              values ('CI Social', 'ci-social', 'active') returning id into v_tenant;
+              insert into public.social_accounts (tenant_id, platform, page_id, page_name)
+              values (v_tenant, 'facebook', 'CI-PAGE-1', 'CI page') returning id into v_account;
+              perform public.set_social_page_token(v_account, 'TOP-SECRET-TOKEN', 'ci-key');
+
+              foreach r in array array['anon', 'authenticated'] loop
+                if has_table_privilege(r, 'public.social_accounts', 'SELECT') then
+                  v_leaks := v_leaks || (r || ' can select social_accounts');
+                end if;
+                if has_function_privilege(r, 'public.social_page_token(text,text,text)', 'EXECUTE') then
+                  v_leaks := v_leaks || (r || ' can call social_page_token');
+                end if;
+                if has_function_privilege(r, 'public.set_social_page_token(uuid,text,text,timestamptz,boolean)', 'EXECUTE') then
+                  v_leaks := v_leaks || (r || ' can call set_social_page_token');
+                end if;
+              end loop;
+
+              -- The safe view exists to answer \"is this connected\" without ever
+              -- carrying the thing that makes it connected.
+              if exists (
+                select 1 from information_schema.columns
+                where table_schema = 'public' and table_name = 'social_accounts_safe'
+                  and column_name in ('token_encrypted', 'token')
+              ) then
+                v_leaks := v_leaks || 'social_accounts_safe exposes the token';
+              end if;
+
+              if array_length(v_leaks, 1) > 0 then
+                raise exception 'page token is reachable: %', array_to_string(v_leaks, ', ');
+              end if;
+              raise notice 'page access tokens are unreadable by any client role OK';
               raise exception 'rollback';
             exception when others then
               if sqlerrm <> 'rollback' then raise; end if;

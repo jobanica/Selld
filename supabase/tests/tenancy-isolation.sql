@@ -3474,6 +3474,7 @@ declare
   i record;
   v_session uuid;
   v_variant uuid;
+  v_product uuid;
 begin
   select * into i from tests.ids;
   perform set_config('request.jwt.claims',
@@ -3482,14 +3483,23 @@ begin
   v_session := (public.live_session_create(i.rhea_tenant, 'Test live', 'facebook',
     'fb-test-video', 30) ->> 'id')::uuid;
 
-  select id into v_variant from public.product_variants where tenant_id = i.rhea_tenant limit 1;
+  -- A product of its own, rather than whatever earlier phases happened to leave.
+  -- `select ... limit 1` with no ORDER BY picked a different variant from run to
+  -- run, and on the runs where it picked one the order tests had already reserved,
+  -- the very first claim came back `sold_out` — a test that failed about one time
+  -- in two and blamed the ingest path for it.
+  insert into public.products (tenant_id, name, slug, status, is_cod_allowed)
+  values (i.rhea_tenant, 'Live fixture item', 'live-fixture-item', 'active', true)
+  returning id into v_product;
 
-  -- Stock of its own, rather than whatever earlier phases happened to leave. A
-  -- fixture that depends on the residue of the tests above passes on a dirty
-  -- database and fails on a clean one, which is the worst way round.
+  insert into public.product_variants (tenant_id, product_id, sku, price_centavos, weight_grams)
+  values (i.rhea_tenant, v_product, 'LIVE-FIXTURE-1', 50000, 300)
+  returning id into v_variant;
+
   insert into public.stock_movements (tenant_id, variant_id, location_id, delta, reason)
   select i.rhea_tenant, v_variant, l.id, 50, 'receive'
-  from public.locations l where l.tenant_id = i.rhea_tenant order by l.created_at limit 1;
+  from public.locations l
+  where l.tenant_id = i.rhea_tenant order by l.is_default desc, l.created_at limit 1;
 
   perform public.live_item_add(v_session, v_variant, 'A1', null);
   perform public.live_session_update(v_session, 'live', 'A1');
@@ -3727,6 +3737,310 @@ set local role authenticated;
 select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
 
 -- ---------------------------------------------------------------------------
+-- Phase 14: Messenger & social integration
+-- ---------------------------------------------------------------------------
+-- Three things are being defended here, in order of how badly they go wrong:
+-- the *page access token*, which can post as the seller and read their inbox;
+-- the *24-hour messaging window*, which is a compliance claim and not a
+-- preference; and the conversations themselves, which are a stranger's phone
+-- number and buying history attached to a name.
+\echo ''
+\echo '=== Phase 14: Messenger & social integration'
+
+reset role;
+do $$
+declare
+  i record;
+  v_account uuid;
+  v_thread  uuid;
+  v_res     jsonb;
+begin
+  select * into i from tests.ids;
+
+  insert into public.social_accounts (tenant_id, platform, page_id, page_name)
+  values (i.rhea_tenant, 'facebook', 'PAGE-TEST-1', 'Rhea test page')
+  returning id into v_account;
+  perform public.set_social_page_token(v_account, 'SECRET-PAGE-TOKEN', 'test-key');
+
+  v_res := public.record_inbound_message(v_account, 'psid-buyer', 'mid-1',
+    'magkano po ang bag?', 'Jasmine', now(), null, 'http://localhost:5174');
+  v_thread := (v_res ->> 'threadId')::uuid;
+
+  create table tests.p14 as
+    select v_account as account_id, v_thread as thread_id;
+  grant select on tests.p14 to authenticated, anon;
+
+  perform tests.eq(v_res ->> 'outcome', 'recorded', 'phase 14 fixture: a buyer messages the Page');
+  perform tests.ok((v_res -> 'autoReply' ->> 'body') like '%rheas-finds%',
+    'and a keyword rule answers with this store''s link, not the platform''s');
+end;
+$$;
+
+-- ---- The token is not readable, by anyone ----------------------------------
+set local role authenticated;
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+do $$
+declare
+  i record;
+  p record;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p14;
+
+  -- Not even the owner of the page. `social_accounts` has no policy at all, and
+  -- the safe view is the only way in.
+  perform tests.rejects($q$ select count(*) from public.social_accounts $q$,
+    'the store''s own owner cannot select from social_accounts');
+  perform tests.eq((select count(*)::int from public.social_accounts_safe), 1,
+    'but the safe view shows her the connection');
+  perform tests.eq((select has_token::text from public.social_accounts_safe), 'true',
+    'including whether a token is stored');
+
+  perform tests.rejects(
+    format($q$ select public.social_page_token('facebook', 'PAGE-TEST-1', 'test-key') $q$),
+    'and the decrypt is callable by nobody with a session');
+  perform tests.rejects(
+    format($q$ select public.set_social_page_token(%L, 'x', 'test-key') $q$, p.account_id),
+    'nor is writing one');
+  perform tests.rejects(
+    format($q$ select public.social_account_connect(%L, 'facebook', 'PAGE-X') $q$, i.rhea_tenant),
+    'nor claiming a page without going through the OAuth callback');
+end;
+$$;
+
+-- ---- Another store sees none of it ------------------------------------------
+select tests.login('22222222-2222-2222-2222-222222222222', 'marlon@example.ph');
+do $$
+declare
+  i record;
+  p record;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p14;
+
+  perform tests.eq((select count(*)::int from public.social_accounts_safe), 0,
+    'Marlon sees none of Rhea''s connected pages');
+  perform tests.eq((select count(*)::int from public.message_threads), 0,
+    'nor a single conversation');
+  perform tests.eq((select count(*)::int from public.messages), 0,
+    'nor a single message');
+  perform tests.eq((select count(*)::int from public.post_comments), 0,
+    'nor what was commented under her posts');
+  perform tests.eq((select count(*)::int from public.auto_replies
+                    where tenant_id = i.rhea_tenant), 0,
+    'nor the words she chose to answer with');
+
+  perform tests.rejects(format($q$ select public.inbox_threads(%L) $q$, i.rhea_tenant),
+    'and he cannot list her inbox');
+  perform tests.rejects(format($q$ select public.inbox_thread(%L) $q$, p.thread_id),
+    'nor open one of her conversations');
+  perform tests.rejects(format($q$ select public.inbox_mark_read(%L) $q$, p.thread_id),
+    'nor mark it read from under her');
+  perform tests.rejects(format($q$ select public.message_send_allowed(%L) $q$, p.thread_id),
+    'nor learn whether she can still reply to it');
+  perform tests.rejects(format($q$ select public.auto_reply_for(%L, 'magkano') $q$, i.rhea_tenant),
+    'nor read back what her auto-reply would say');
+  perform tests.rejects(format($q$ select public.social_account_disconnect(%L) $q$, p.account_id),
+    'nor disconnect her page');
+
+  -- The `_raw` primitives exist so the checked wrappers above can be checked.
+  perform tests.rejects(format($q$ select public.message_send_allowed_raw(%L) $q$, p.thread_id),
+    'and the unchecked window check is callable by nobody with a session');
+  perform tests.rejects(format($q$ select public.auto_reply_for_raw(%L, 'magkano') $q$, i.rhea_tenant),
+    'nor the unchecked matcher');
+  perform tests.rejects(format($q$ select public.tenant_store_url(%L) $q$, i.rhea_tenant),
+    'nor the store-url helper they both use');
+end;
+$$;
+
+-- ---- Writing is the server's job -------------------------------------------
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+do $$
+declare
+  i record;
+  p record;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p14;
+
+  perform tests.eq((select count(*)::int from public.inbox_threads(i.rhea_tenant)), 1,
+    'Rhea reads her own inbox');
+  perform tests.ok(
+    (public.inbox_thread(p.thread_id) -> 'sendWindow' ->> 'verdict') = 'standard',
+    'and can see the window is open');
+
+  -- Every write that could produce a message goes through a function that
+  -- refuses. A row typed straight into the table would be a send nobody made and
+  -- a window nobody opened.
+  perform tests.rejects(
+    format($q$ insert into public.messages (tenant_id, thread_id, direction, body)
+               values (%L, %L, 'out', 'hello') $q$, i.rhea_tenant, p.thread_id),
+    'but she cannot write a message straight into the table');
+  perform tests.rejects(
+    format($q$ update public.message_threads set last_inbound_at = now() where id = %L $q$,
+      p.thread_id),
+    'nor push the 24-hour window forward by hand');
+  perform tests.rejects(
+    format($q$ select public.record_inbound_message(%L, 'psid-x', 'mid-x', 'hi') $q$,
+      p.account_id),
+    'nor record an inbound message that never arrived');
+  perform tests.rejects(
+    format($q$ select public.record_outbound_message(%L, 'hello') $q$, p.thread_id),
+    'nor log a send the Send API never made');
+  perform tests.rejects(
+    format($q$ select public.record_post_comment(%L, 'post', 'c1', 'psid', 'magkano') $q$,
+      p.account_id),
+    'nor invent a comment to be auto-replied to');
+  perform tests.rejects(
+    $q$ select public.social_account_for_page('facebook', 'PAGE-TEST-1') $q$,
+    'nor use the lookup that crosses tenants to find a page''s owner');
+end;
+$$;
+
+-- ---- The window is enforced where it cannot be forgotten -------------------
+reset role;
+do $$
+declare
+  p record;
+  v_res jsonb;
+  v_before int;
+begin
+  select * into p from tests.p14;
+
+  select count(*)::int into v_before from public.messages where thread_id = p.thread_id;
+
+  -- Inside the window: an ordinary reply.
+  v_res := public.record_outbound_message(p.thread_id, 'Here po ang link', 'auto_reply');
+  perform tests.eq(v_res ->> 'outcome', 'sent', 'inside 24 hours a reply is sent');
+
+  -- 25 hours later it is not, and no amount of asking changes it.
+  update public.message_threads set last_inbound_at = now() - interval '25 hours'
+   where id = p.thread_id;
+
+  v_res := public.record_outbound_message(p.thread_id, 'still there?', 'auto_reply');
+  perform tests.eq(v_res ->> 'outcome', 'blocked', 'past 24 hours it is refused');
+  perform tests.eq(v_res ->> 'reason', 'window_closed', 'and says why');
+  perform tests.eq((select count(*)::int from public.messages where thread_id = p.thread_id),
+    v_before + 1,
+    'and nothing was written that claims it was sent');
+
+  -- A tag is the only way out, and only the right tag.
+  perform tests.eq(
+    public.record_outbound_message(p.thread_id, 'Your parcel shipped', 'auto_reply',
+      'POST_PURCHASE_UPDATE') ->> 'outcome', 'sent',
+    'a purchase update reaches them');
+  perform tests.eq(
+    public.record_outbound_message(p.thread_id, 'Sale today!', 'auto_reply',
+      'MARKETING') ->> 'reason', 'unknown_tag',
+    'an invented tag does not');
+  perform tests.eq(
+    public.record_outbound_message(p.thread_id, 'hi', 'auto_reply', 'HUMAN_AGENT') ->> 'reason',
+    'tag_needs_a_human',
+    'and an automation may not claim a human is typing');
+  perform tests.eq(
+    public.record_outbound_message(p.thread_id, 'hi', 'agent', 'HUMAN_AGENT') ->> 'outcome',
+    'sent',
+    'though a person may');
+
+  -- A page cannot open a conversation with someone who never wrote to it.
+  update public.message_threads set last_inbound_at = null where id = p.thread_id;
+  perform tests.eq(
+    public.record_outbound_message(p.thread_id, 'hi there', 'auto_reply') ->> 'reason',
+    'never_messaged_us',
+    'and a page may not start a conversation at all');
+
+  update public.message_threads set last_inbound_at = now() where id = p.thread_id;
+end;
+$$;
+
+-- ---- A redelivered inbound message does not extend the window --------------
+do $$
+declare
+  p record;
+  v_res jsonb;
+  v_at  timestamptz;
+begin
+  select * into p from tests.p14;
+
+  update public.message_threads set last_inbound_at = now() - interval '20 hours'
+   where id = p.thread_id;
+  select last_inbound_at into v_at from public.message_threads where id = p.thread_id;
+
+  v_res := public.record_inbound_message(p.account_id, 'psid-buyer', 'mid-1', 'magkano po?');
+  perform tests.eq(v_res ->> 'outcome', 'duplicate', 'the same message id twice is a duplicate');
+  perform tests.eq(
+    (select last_inbound_at from public.message_threads where id = p.thread_id), v_at,
+    'and it does not extend the 24-hour window on stale evidence');
+end;
+$$;
+
+-- ---- The comment play is exactly once --------------------------------------
+do $$
+declare
+  p record;
+  v_res jsonb;
+begin
+  select * into p from tests.p14;
+
+  v_res := public.record_post_comment(p.account_id, 'post-1', 'comment-1', 'psid-mark',
+    'magkano po ito?', 'Mark', null, 'http://localhost:5174');
+  perform tests.eq(v_res ->> 'outcome', 'reply', 'a comment with a keyword gets an answer');
+  perform tests.ok((v_res ->> 'body') like '%rheas-finds%', 'carrying this store''s link');
+
+  v_res := public.record_post_comment(p.account_id, 'post-1', 'comment-1', 'psid-mark',
+    'magkano po ito?', 'Mark');
+  perform tests.eq(v_res ->> 'outcome', 'duplicate',
+    'and Facebook redelivering it sends nothing a second time');
+
+  v_res := public.record_post_comment(p.account_id, 'post-1', 'comment-2', 'psid-liza',
+    'ang ganda ng codigo', 'Liza');
+  perform tests.eq(v_res ->> 'outcome', 'no_rule',
+    'a word that merely contains a keyword is not a question');
+end;
+$$;
+
+-- ---- A buyer has no business here ------------------------------------------
+-- `logout()` first, and not as a formality: the role alone is not the identity.
+-- `is_tenant_member` reads `auth.uid()` from the JWT claims, so switching to
+-- `anon` while a seller's claims are still set leaves every definer function
+-- answering as that seller — and the assertion that a buyer cannot read a
+-- conversation passes for the wrong reason, or in this case fails loudly.
+select tests.logout();
+set local role anon;
+do $$
+declare
+  i record;
+  p record;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p14;
+
+  perform tests.rejects($q$ select count(*) from public.message_threads $q$,
+    'anon has no grant on conversations');
+  perform tests.rejects($q$ select count(*) from public.messages $q$,
+    'nor on messages');
+  perform tests.rejects($q$ select count(*) from public.social_accounts_safe $q$,
+    'nor on connected pages');
+  perform tests.rejects($q$ select count(*) from public.auto_replies $q$,
+    'nor on the seller''s auto-replies');
+  perform tests.rejects(
+    format($q$ select public.record_post_comment(%L, 'p', 'c9', 'psid', 'magkano') $q$,
+      p.account_id),
+    'and cannot make a seller''s page message a stranger');
+  perform tests.rejects(
+    format($q$ select public.inbox_thread(%L) $q$, p.thread_id),
+    'nor read a conversation');
+  perform tests.rejects(
+    $q$ select public.social_page_token('facebook', 'PAGE-TEST-1', 'test-key') $q$,
+    'and above all cannot ask for the page token');
+end;
+$$;
+
+reset role;
+set local role authenticated;
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+
+-- ---------------------------------------------------------------------------
 -- my_tenants()
 -- ---------------------------------------------------------------------------
 \echo ''
@@ -3763,8 +4077,8 @@ declare v_passed int := coalesce(nullif(current_setting('tests.passed', true), '
 begin
   raise notice '';
   raise notice '=== % assertions passed', v_passed;
-  if v_passed < 465 then
-    raise exception 'Expected at least 465 assertions, only % ran — did a section get skipped?', v_passed
+  if v_passed < 510 then
+    raise exception 'Expected at least 510 assertions, only % ran — did a section get skipped?', v_passed
       using errcode = 'triggered_action_exception';
   end if;
 end;
