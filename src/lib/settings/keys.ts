@@ -28,6 +28,8 @@ export type SettingKey =
   | 'shipping.flat_centavos'
   | 'risk.contribute_signal'
   | 'risk.use_shared_signal'
+  | 'analytics.subscription_centavos'
+  | 'analytics.marketplace_commission_bps'
 
 export interface TenantSettings {
   /** Which wizard step to resume at, 1-5. */
@@ -72,6 +74,27 @@ export interface TenantSettings {
    * a free ride on other sellers' data, so `buyer_risk_lookup` requires both.
    */
   'risk.use_shared_signal': boolean
+  /**
+   * What Selld costs this store per month.
+   *
+   * A cost like any other, and it belongs in the profit subtraction for the same
+   * reason ad spend does: a seller asking whether they made money is asking after
+   * *everything*, and a platform that quietly leaves its own fee out of that sum
+   * is the one thing on the screen with a motive.
+   *
+   * Pro-rated by days when the window is not a whole month. Phase 19 replaces
+   * this with the real subscription; until then it is a number a seller types.
+   */
+  'analytics.subscription_centavos': Centavos
+  /**
+   * What a marketplace would have charged on the same sales, in basis points.
+   *
+   * 550 by default — roughly Shopee and Lazada's PH non-mall commission once the
+   * payment fee is added. It is a setting rather than a constant because the rate
+   * differs by category and by seller tier, and a retention counter built on a
+   * number the seller knows to be wrong is worse than no counter.
+   */
+  'analytics.marketplace_commission_bps': Bps
 }
 
 export const SETTING_DEFAULTS: TenantSettings = {
@@ -88,6 +111,8 @@ export const SETTING_DEFAULTS: TenantSettings = {
   'shipping.flat_centavos': centavos(8000),
   'risk.contribute_signal': false,
   'risk.use_shared_signal': false,
+  'analytics.subscription_centavos': centavos(0),
+  'analytics.marketplace_commission_bps': 550 as Bps,
 }
 
 type Parser<K extends SettingKey> = (raw: unknown) => TenantSettings[K] | undefined
@@ -116,6 +141,14 @@ const PARSERS: { [K in SettingKey]: Parser<K> } = {
       ? (raw as Bps)
       : undefined,
   'payments.online_enabled': (raw) => (typeof raw === 'boolean' ? raw : undefined),
+  'analytics.subscription_centavos': (raw) =>
+    typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 0
+      ? (raw as Centavos)
+      : undefined,
+  'analytics.marketplace_commission_bps': (raw) =>
+    typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 0 && raw <= 10_000
+      ? (raw as Bps)
+      : undefined,
   'orders.number_prefix': (raw) =>
     typeof raw === 'string' && raw.length <= 8 ? raw : undefined,
   'orders.auto_confirm': (raw) => (typeof raw === 'boolean' ? raw : undefined),

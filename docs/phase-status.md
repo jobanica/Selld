@@ -1734,3 +1734,73 @@ pack it twice.
 **Gate:** `pnpm verify` (517 tests), `pnpm db:test` (642 assertions),
 `pnpm db:test:concurrency`. All 22 migrations apply from scratch on PG 17.6.
 Sixteen sabotages of the phase-17 guards, each caught by the probe.
+
+---
+
+## Phase 18 — Analytics & true profit
+
+**Done when:** the seller can answer *"kumita ba ako this month, at magkano
+talaga"* in one glance.
+
+**Measured** in a real browser at 390px, against a month engineered to be a
+trap — twenty rattan bags at an 8% margin and six serums at 60%, two returns,
+and a payday ad campaign:
+
+| | |
+|---|---|
+| revenue | ₱29,080 — reads like a good month |
+| gross margin | ₱5,880 — still reads like a good month |
+| **the first number on the home screen** | **−₱5,350**, above the fold at y=215 |
+| in as many words | "Lugi this month — you spent more than you made." |
+| tapping it | opens the arithmetic: every peso subtracted, in order |
+| best product by margin rate | the serum, at 60% |
+| what you keep least on | the bag, at 8.3% — the one that sold four times as much |
+| commission kept | ₱1,599.40, with what a marketplace actually took beside it |
+
+### What shipped
+
+- **True profit**: revenue − COGS − shipping actually paid − COD fees − payment
+  fees − marketplace commission − returns (both legs) − ad spend − the Selld
+  subscription. Every cost aggregated against the order set independently, so an
+  order with three items does not pay its shipping three times.
+- **Revenue is money that arrived** — delivered, or paid — the same rule phase 15
+  chose for lifetime value, because two screens in one product disagreeing about
+  one order is worse than either being wrong alone. COD in a van is reported
+  separately as `inFlight`.
+- **Coverage.** A cost we do not know is reported as unknown, never as zero, and
+  `costedFraction` says what share of item revenue has a cost behind it. A
+  product nobody has costed is kept out of the margin ranking entirely.
+- **Commission kept**, excluding orders that came *from* a marketplace, with what
+  those marketplaces actually took shown beside it.
+- **Ad spend**, typed per day per channel — the one cost nothing here can see —
+  and `orders.platform_fee_centavos`, which phase 17 pulled and discarded.
+- **Trends**: revenue, RTS rate over parcels whose fate is *decided*, and
+  cohort repeat-purchase rate by first-order month.
+
+### Notable findings
+
+| Symptom | Cause |
+|---|---|
+| "Best products by margin" was topped by an uncosted product | Its margin computes as the whole sale price, so the most profitable thing in the store turned out to be the one nobody had costed. Uncosted products are now excluded from the ranking and listed as work instead. |
+| "Your thinnest margin is Rosehip Serum" — the store's *best* product | `worstProduct` ranked by total margin, so six 60%-margin serums lost to twenty 8% bags. The seller's question is a rate, not a total. Floored at 5% of item revenue so one incidental sale cannot win. |
+| Coverage could never reach 100% | It compared item line totals against order grand totals, which carry shipping and COD fees no line accounts for. A store with perfect cost data still read 97%. |
+| The probe's own fixture landed in the wrong month | `date + interval` is a bare timestamp stored as UTC, so "hour 20 of the month" is the next Manila day. The fixture now builds real `timestamptz` values at Manila times. |
+
+### Deliberately deferred
+
+- **No Meta Ads API.** The spec allows "manual entry or Meta API"; manual entry
+  is here and is what a seller can use today. Pulling spend automatically means
+  an OAuth flow, a per-account token and a second thing to reconcile against
+  what Facebook's own dashboard says — worth doing next to a real ad account.
+- **The Selld subscription is a typed setting**, pro-rated by days. Phase 19 is
+  billing, and that is where the real figure comes from.
+- **No date-range picker.** The window defaults to this Manila month and the
+  functions take `from`/`to`, so the capability is there; a seller asking "how
+  was last quarter" is a different screen from one asking "am I okay right now".
+- **No cost-price backfill tool.** The coverage figure names the gap and the
+  uncosted list names the products; walking a seller through fixing it is an
+  onboarding job, not an analytics one.
+
+**Gate:** `pnpm verify` (517 tests), `pnpm db:test` (660 assertions),
+`pnpm db:test:concurrency`. All 23 migrations apply from scratch on PG 17.6.
+Eleven sabotages of the phase-18 arithmetic, each caught by the probe.

@@ -5,7 +5,7 @@ Build one phase per session, in order. The full roadmap is in
 [`docs/build-spec.md`](docs/build-spec.md); who we're building for is in
 [`docs/avatar.md`](docs/avatar.md).
 
-**Current state: phase 17 complete.** Next up is phase 18 (analytics & true profit).
+**Current state: phase 18 complete.** Next up is phase 19 (billing, super admin & white-label).
 
 ---
 
@@ -259,6 +259,16 @@ What follows from that:
   `marketplace_push_record` and `marketplace_order_ingest` are `service_role`
   only; what a seller presses goes through checked wrappers.
 
+- **Phase 18 has no new boundary either, and one new rule: never overstate
+  profit.** Understating it makes a seller cautious; overstating it makes them
+  spend money they do not have, and it is the *easy* mistake, because every
+  missing cost silently improves the number. So a cost that is unknown is
+  reported as unknown rather than as zero, `coverage` says what share of item
+  revenue has a cost behind it, and a product nobody has costed is kept out of
+  the margin ranking instead of topping it. The analytics functions are
+  `authenticated`-only for the same reason `products_public` exists: the product
+  breakdown carries `cost_centavos`, which is the seller's margin.
+
 **`cart_pricing()` is the only place money is computed.** The quote the buyer sees
 and the order that gets written both go through it, so they cannot disagree.
 `cart_items.unit_price_centavos` is a display snapshot and is never charged —
@@ -276,8 +286,8 @@ src/
   app/          ← dashboard (authenticated seller surface)
   storefront/   ← public buyer surface, own perf budget
   features/     ← feature slices; may import from core and lib
-    address/ auth/ broadcasts/ catalog/ cod/ customers/ inbox/ inventory/ live/
-    marketplaces/ onboarding/ orders/ tenancy/
+    address/ analytics/ auth/ broadcasts/ catalog/ cod/ customers/ inbox/
+    inventory/ live/ marketplaces/ onboarding/ orders/ tenancy/
   lib/          ← money, phone, psgc, i18n, time, supabase, tenant
   components/ui ← shadcn/ui primitives
 ```
@@ -655,6 +665,30 @@ one new file plus one registry line, and zero lines of order logic.
   next to a text array is parsed as an array literal, so a diagnostic message
   containing a comma fails as *malformed array literal* instead of being
   reported. Cast the element: `leaked || 'message'::text`.
+- **Revenue is money that arrived, and every screen has to agree on that.**
+  Delivered, or paid — the rule phase 15 chose for lifetime value and phase 18
+  reuses for profit. A COD parcel in a van is `inFlight`, not revenue; an RTS
+  parcel never was, and it cost both legs. Two screens in one product disagreeing
+  about one order is worse than either being wrong on its own.
+- **Aggregate each cost against the order set separately.** Joining shipments,
+  payments and order items onto orders in one query multiplies rows: an order
+  with three items and two payments counts its shipping cost six times. Invisible
+  until a seller's profit is wrong by exactly the size of their biggest order.
+- **"Best by margin" must mean a rate somewhere and a total somewhere.** Ranking
+  the *worst* product by total margin named the store's best product, because six
+  60%-margin serums earn less in total than twenty 8% bags. The list ranks by
+  contribution; "what you keep least on" ranks by rate, with a revenue floor so a
+  single incidental sale cannot win.
+- **An uncosted product computes a margin equal to its sale price**, which puts
+  it top of any list headed "best products". Exclude it and name it as work.
+- **`date + interval` is a bare timestamp, stored as if it were UTC.** So "hour
+  20 of the month" is the *next* Manila day, and a fixture built that way
+  silently drops rows out of the window it is testing. Build
+  `(d + time '09:00') at time zone 'Asia/Manila'` when you mean a Manila instant.
+- **A coverage ratio has to compare like with like.** `costedFraction` measured
+  item line totals against order grand totals, which carry shipping and COD fees
+  no line accounts for — so a store with perfect cost data still read 97% and
+  looked permanently short of something.
 
 ## Package manager
 

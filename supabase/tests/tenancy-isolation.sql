@@ -4766,6 +4766,133 @@ $$;
 set local role authenticated;
 select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
 
+reset role;
+
+-- ---------------------------------------------------------------------------
+-- Phase 18: analytics & true profit
+-- ---------------------------------------------------------------------------
+\echo ''
+\echo '=== Phase 18: analytics & true profit'
+
+do $$
+declare
+  i record;
+  v_spend uuid;
+begin
+  select * into i from tests.ids;
+
+  insert into public.ad_spend (tenant_id, spent_on, channel, amount_centavos, note)
+  values (i.rhea_tenant, (now() at time zone 'Asia/Manila')::date, 'facebook', 150000,
+          'payday boost')
+  returning id into v_spend;
+
+  create table tests.p18 as select v_spend as spend_id;
+  grant select on tests.p18 to authenticated, anon;
+
+  perform tests.ok(v_spend is not null, 'phase 18 fixture: a day of ad spend');
+end;
+$$;
+
+-- ---- The seller reads their own books --------------------------------------
+set local role authenticated;
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+
+  perform tests.ok(public.analytics_profit(i.rhea_tenant) is not null,
+    'Rhea can ask whether she made money');
+  perform tests.ok(public.analytics_breakdown(i.rhea_tenant) is not null,
+    'and which products were worth selling');
+  perform tests.ok(public.analytics_trends(i.rhea_tenant, 3) is not null,
+    'and how the last three months went');
+  perform tests.eq((select count(*)::int from public.ad_spend), 1,
+    'and she sees her own ad spend');
+end;
+$$;
+
+-- ---- Another store sees none of it ------------------------------------------
+select tests.login('22222222-2222-2222-2222-222222222222', 'marlon@example.ph');
+do $$
+declare
+  i record;
+  p record;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p18;
+
+  perform tests.eq((select count(*)::int from public.ad_spend), 0,
+    'Marlon sees none of Rhea''s ad spend');
+
+  -- Profit is the single most sensitive number in the product, and the
+  -- breakdown carries cost prices — the thing `products_public` exists to keep
+  -- from a buyer. A competitor reading either would know her margins.
+  perform tests.rejects(format($q$ select public.analytics_profit(%L) $q$, i.rhea_tenant),
+    'and above all cannot read her profit');
+  perform tests.rejects(format($q$ select public.analytics_breakdown(%L) $q$, i.rhea_tenant),
+    'nor her cost prices through the product breakdown');
+  perform tests.rejects(
+    format($q$ select public.analytics_commission_kept(%L) $q$, i.rhea_tenant),
+    'nor what she bills');
+  perform tests.rejects(format($q$ select public.analytics_trends(%L) $q$, i.rhea_tenant),
+    'nor her return rate');
+  perform tests.rejects(format($q$ select public.ad_spend_list(%L) $q$, i.rhea_tenant),
+    'nor what she spends on ads');
+  perform tests.rejects(
+    format($q$ select public.ad_spend_record(%L, current_date, 999999) $q$, i.rhea_tenant),
+    'and cannot type an expense into her books, which would move her profit');
+
+  perform tests.eq(
+    tests.affected(format($q$ update public.ad_spend set amount_centavos = 1 where id = %L $q$,
+      p.spend_id)),
+    0::bigint,
+    'nor edit the one she typed — RLS denies, so zero rows');
+end;
+$$;
+
+-- ---- A buyer least of all ---------------------------------------------------
+select tests.logout();
+set local role anon;
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+
+  perform tests.rejects($q$ select count(*) from public.ad_spend $q$,
+    'anon has no grant on ad spend');
+  perform tests.rejects(format($q$ select public.analytics_profit(%L) $q$, i.rhea_tenant),
+    'nor any way to ask a store what it earns');
+  perform tests.rejects(format($q$ select public.analytics_breakdown(%L) $q$, i.rhea_tenant),
+    'nor what its stock costs it');
+end;
+$$;
+
+-- ---- One expense per day per channel ----------------------------------------
+reset role;
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+
+  -- Two rows for one day is how ad spend gets double-counted and profit
+  -- understated. A seller correcting yesterday's figure is editing it.
+  perform tests.rejects(
+    format($q$ insert into public.ad_spend (tenant_id, spent_on, channel, amount_centavos)
+      values (%L, (now() at time zone 'Asia/Manila')::date, 'facebook', 100) $q$,
+      i.rhea_tenant),
+    'a second row for the same day and channel is refused');
+
+  perform tests.rejects(
+    format($q$ insert into public.ad_spend (tenant_id, spent_on, channel, amount_centavos)
+      values (%L, current_date - 1, 'facebook', -100) $q$, i.rhea_tenant),
+    'and a negative spend is not an expense');
+end;
+$$;
+
+set local role authenticated;
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+
 -- ---------------------------------------------------------------------------
 -- my_tenants()
 -- ---------------------------------------------------------------------------
@@ -4803,8 +4930,8 @@ declare v_passed int := coalesce(nullif(current_setting('tests.passed', true), '
 begin
   raise notice '';
   raise notice '=== % assertions passed', v_passed;
-  if v_passed < 635 then
-    raise exception 'Expected at least 635 assertions, only % ran — did a section get skipped?', v_passed
+  if v_passed < 650 then
+    raise exception 'Expected at least 650 assertions, only % ran — did a section get skipped?', v_passed
       using errcode = 'triggered_action_exception';
   end if;
 end;

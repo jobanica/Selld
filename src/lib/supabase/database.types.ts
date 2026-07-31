@@ -123,6 +123,64 @@ export type Database = {
           },
         ]
       }
+      ad_spend: {
+        Row: {
+          amount_centavos: number
+          channel: string
+          created_at: string
+          created_by: string | null
+          id: string
+          note: string | null
+          spent_on: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          amount_centavos: number
+          channel?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          note?: string | null
+          spent_on: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          amount_centavos?: number
+          channel?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          note?: string | null
+          spent_on?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ad_spend_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ad_spend_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ad_spend_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       auto_replies: {
         Row: {
           body: string
@@ -3061,6 +3119,7 @@ export type Database = {
           payment_method: string
           payment_status: string
           placed_at: string
+          platform_fee_centavos: number
           shipping_address: Json
           shipping_total_centavos: number
           source: string
@@ -3088,6 +3147,7 @@ export type Database = {
           payment_method: string
           payment_status?: string
           placed_at?: string
+          platform_fee_centavos?: number
           shipping_address: Json
           shipping_total_centavos?: number
           source?: string
@@ -3115,6 +3175,7 @@ export type Database = {
           payment_method?: string
           payment_status?: string
           placed_at?: string
+          platform_fee_centavos?: number
           shipping_address?: Json
           shipping_total_centavos?: number
           source?: string
@@ -5750,8 +5811,43 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      ad_spend_list: {
+        Args: { p_from?: string; p_tenant_id: string; p_to?: string }
+        Returns: Json
+      }
+      ad_spend_record: {
+        Args: {
+          p_amount: number
+          p_channel?: string
+          p_note?: string
+          p_spent_on: string
+          p_tenant_id: string
+        }
+        Returns: string
+      }
       add_order_note: {
         Args: { p_body: string; p_order_id: string }
+        Returns: Json
+      }
+      analytics_breakdown: {
+        Args: {
+          p_from?: string
+          p_limit?: number
+          p_tenant_id: string
+          p_to?: string
+        }
+        Returns: Json
+      }
+      analytics_commission_kept: {
+        Args: { p_from?: string; p_tenant_id: string; p_to?: string }
+        Returns: Json
+      }
+      analytics_profit: {
+        Args: { p_from?: string; p_tenant_id: string; p_to?: string }
+        Returns: Json
+      }
+      analytics_trends: {
+        Args: { p_months?: number; p_tenant_id: string }
         Returns: Json
       }
       apply_reservation: {
