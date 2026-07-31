@@ -4510,6 +4510,259 @@ end;
 $$;
 
 reset role;
+
+-- ---------------------------------------------------------------------------
+-- Phase 17: marketplace sync
+-- ---------------------------------------------------------------------------
+\echo ''
+\echo '=== Phase 17: marketplace sync'
+
+do $$
+declare
+  i record;
+  v_conn    uuid;
+  v_listing uuid;
+  v_variant uuid;
+  v_issue   uuid;
+begin
+  select * into i from tests.ids;
+
+  select v.id into v_variant from public.product_variants v
+   where v.tenant_id = i.rhea_tenant limit 1;
+
+  insert into public.marketplace_connections (tenant_id, platform, shop_id, shop_name)
+  values (i.rhea_tenant, 'shopee', 'SHOP-1', 'Rhea''s Finds')
+  returning id into v_conn;
+
+  perform public.set_marketplace_credentials(
+    v_conn, '{"accessToken":"secret-token"}'::jsonb, 'tenancy-key', now() + interval '4 hours');
+
+  insert into public.marketplace_listings
+    (tenant_id, connection_id, external_item_id, external_variation_id, external_sku,
+     name, variant_id)
+  values (i.rhea_tenant, v_conn, 'IT-1', '11', 'RH-30ML', 'Rosehip 30ml', v_variant)
+  returning id into v_listing;
+
+  insert into public.marketplace_issues
+    (tenant_id, connection_id, listing_id, kind, reference, message)
+  values (i.rhea_tenant, v_conn, v_listing, 'push_rejected', v_listing::text, 'refused')
+  returning id into v_issue;
+
+  create table tests.p17 as
+    select v_conn as connection_id, v_listing as listing_id, v_variant as variant_id,
+           v_issue as issue_id;
+  grant select on tests.p17 to authenticated, anon;
+
+  perform tests.ok(v_conn is not null,
+    'phase 17 fixture: a connected shop, a mapped listing and a queue item');
+end;
+$$;
+
+-- ---- The access token is the most dangerous thing here ---------------------
+set local role authenticated;
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+do $$
+declare
+  i record;
+  p record;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p17;
+
+  -- `marketplace_connections` has RLS on and *no policy at all*, plus no SELECT
+  -- grant — the same shape as `social_accounts`. A marketplace token can list,
+  -- reprice and cancel as the seller.
+  perform tests.rejects($q$ select count(*) from public.marketplace_connections $q$,
+    'not even the owner can read the connection row that holds the token');
+  perform tests.rejects(
+    format($q$ select public.marketplace_credentials(%L, 'tenancy-key') $q$, p.connection_id),
+    'nor call the thing that decrypts it');
+
+  -- What she *can* see is the derived view.
+  perform tests.eq((select count(*)::int from public.marketplace_connections_safe), 1,
+    'she sees her own shop through the safe view');
+  perform tests.eq(
+    (select has_credentials from public.marketplace_connections_safe limit 1), true,
+    'which tells her it is connected without carrying the token');
+  perform tests.ok(
+    not exists (
+      select 1 from information_schema.columns
+      where table_schema = 'public' and table_name = 'marketplace_connections_safe'
+        and column_name in ('credentials_encrypted', 'access_token')),
+    'and the view has no column that could carry one');
+
+  perform tests.eq((select count(*)::int from public.marketplace_listings), 1,
+    'she reads her own listings');
+  perform tests.ok(public.marketplace_overview(i.rhea_tenant) is not null,
+    'and the screen renders for her');
+end;
+$$;
+
+-- ---- Another store sees none of it ------------------------------------------
+select tests.login('22222222-2222-2222-2222-222222222222', 'marlon@example.ph');
+do $$
+declare
+  i record;
+  p record;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p17;
+
+  perform tests.eq((select count(*)::int from public.marketplace_connections_safe), 0,
+    'Marlon sees none of Rhea''s shops');
+  perform tests.eq((select count(*)::int from public.marketplace_listings), 0,
+    'nor which of her products they sell');
+  perform tests.eq((select count(*)::int from public.marketplace_sync_logs), 0,
+    'nor what has been synced');
+  perform tests.eq((select count(*)::int from public.marketplace_issues), 0,
+    'nor the work she has outstanding');
+
+  perform tests.rejects(format($q$ select public.marketplace_overview(%L) $q$, i.rhea_tenant),
+    'and he cannot ask for her marketplace screen');
+  perform tests.rejects(
+    format($q$ select public.marketplace_connect(%L, 'shopee', 'MINE') $q$, i.rhea_tenant),
+    'nor attach a shop of his own to her store');
+  perform tests.rejects(
+    format($q$ select public.marketplace_set_sync(%L, true, true) $q$, p.connection_id),
+    'nor switch her sync on');
+  perform tests.rejects(
+    format($q$ select public.marketplace_map_listing(%L, null) $q$, p.listing_id),
+    'nor unlink one of her listings — which would silently stop her stock syncing');
+  -- The real id from the fixture, not one selected through his own RLS: that
+  -- would be null, the function would return early, and the assertion would
+  -- pass without the guard existing.
+  perform tests.rejects(
+    format($q$ select public.marketplace_issue_resolve(%L) $q$, p.issue_id),
+    'nor clear work off her queue');
+
+  -- The worker's half.
+  perform tests.rejects($q$ select public.marketplace_push_claim(10) $q$,
+    'the push loop is the server''s alone');
+  perform tests.rejects(
+    format($q$ select public.marketplace_push_record(%L, 'ok', 0) $q$, p.listing_id),
+    'and so is recording what it pushed');
+  perform tests.rejects(
+    format($q$ select public.marketplace_order_ingest(%L, '{}'::jsonb) $q$, p.connection_id),
+    'and writing an order into her store');
+  perform tests.rejects($q$ select public.marketplace_connections_due() $q$,
+    'nor asking which shops are due a pull');
+  perform tests.rejects(
+    format($q$ select public.set_marketplace_credentials(%L, '{}'::jsonb, 'k') $q$,
+      p.connection_id),
+    'and above all cannot replace the token on her shop');
+end;
+$$;
+
+-- ---- A buyer has no business here ------------------------------------------
+select tests.logout();
+set local role anon;
+do $$
+declare
+  i record;
+  p record;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p17;
+
+  perform tests.rejects($q$ select count(*) from public.marketplace_connections_safe $q$,
+    'anon has no grant on the safe view either');
+  perform tests.rejects($q$ select count(*) from public.marketplace_listings $q$,
+    'nor on the listings');
+  perform tests.rejects($q$ select count(*) from public.marketplace_stock_queue $q$,
+    'nor on the worker''s queue');
+  perform tests.rejects($q$ select count(*) from public.marketplace_issues $q$,
+    'nor on the seller''s work list');
+  perform tests.rejects(format($q$ select public.marketplace_overview(%L) $q$, i.rhea_tenant),
+    'and cannot ask for a store''s marketplace screen');
+  perform tests.rejects(
+    format($q$ select public.marketplace_order_ingest(%L, '{}'::jsonb) $q$, p.connection_id),
+    'nor post an order into one');
+end;
+$$;
+
+-- ---- The mapping is what keeps stock honest, so it is constrained ----------
+reset role;
+do $$
+declare
+  i record;
+  p record;
+  v_other uuid;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p17;
+
+  -- One listing per variant on a connection. Two listings sharing a variant is
+  -- one number being spent twice, which is the overselling this phase exists to
+  -- stop — so it is refused by an index rather than reconciled afterwards.
+  perform tests.rejects(
+    format($q$ insert into public.marketplace_listings
+      (tenant_id, connection_id, external_item_id, external_sku, variant_id)
+      values (%L, %L, 'IT-2', 'RH-30ML-B', %L) $q$,
+      i.rhea_tenant, p.connection_id, p.variant_id),
+    'two listings on one shop cannot share a product');
+
+  -- One row per listing. `nulls not distinct`, because a product with no
+  -- variations has a null variation id and two of those are the same listing.
+  perform tests.rejects(
+    format($q$ insert into public.marketplace_listings
+      (tenant_id, connection_id, external_item_id, external_variation_id)
+      values (%L, %L, 'IT-1', '11') $q$, i.rhea_tenant, p.connection_id),
+    'and the same listing cannot be imported twice');
+
+  -- A cross-tenant listing is unrepresentable, not merely forbidden: the child
+  -- carries `tenant_id` and the FK is composite.
+  select id into v_other from public.tenants where id <> i.rhea_tenant limit 1;
+  perform tests.rejects(
+    format($q$ insert into public.marketplace_listings
+      (tenant_id, connection_id, external_item_id) values (%L, %L, 'IT-9') $q$,
+      v_other, p.connection_id),
+    'and a listing cannot point at another tenant''s shop');
+
+  -- Sync cannot be switched on without credentials: finding that out at push
+  -- time is a queue of failures instead of one sentence on a settings screen.
+  perform tests.rejects(
+    format($q$ insert into public.marketplace_connections
+      (tenant_id, platform, shop_id, sync_stock) values (%L, 'lazada', 'L-1', true) $q$,
+      i.rhea_tenant),
+    'and a shop cannot sync before it has been signed in to');
+
+  -- Idempotency for the order pull is an index, not a check-then-insert: a pull
+  -- is repeated by design, and two workers racing on "does this order exist yet"
+  -- both lose by creating the parcel twice.
+  --
+  -- Written with a literal rather than by selecting an existing `channel_ref`.
+  -- Nothing else in the schema writes that column, so the select found no rows,
+  -- the insert inserted nothing, and the assertion passed with no index at all.
+  insert into public.orders
+    (tenant_id, order_number, shipping_address, contact_name, contact_phone,
+     subtotal_centavos, grand_total_centavos, payment_method, payment_status,
+     fulfillment_status, source, channel_ref)
+  values (i.rhea_tenant, 'MP-17-A', '{}'::jsonb, 'Marites', '+639171234567',
+          0, 0, 'cod', 'unpaid', 'pending', 'marketplace', 'SPE-TENANCY-1');
+
+  perform tests.rejects(
+    format($q$ insert into public.orders
+      (tenant_id, order_number, shipping_address, contact_name, contact_phone,
+       subtotal_centavos, grand_total_centavos, payment_method, payment_status,
+       fulfillment_status, source, channel_ref)
+      values (%L, 'MP-17-B', '{}'::jsonb, 'Marites', '+639171234567',
+              0, 0, 'cod', 'unpaid', 'pending', 'marketplace', 'SPE-TENANCY-1') $q$,
+      i.rhea_tenant),
+    'and one marketplace order id can only ever be one Selld order');
+
+  -- The index is partial, so it must not stop two storefront orders coexisting.
+  perform tests.eq(
+    tests.affected(format($q$ insert into public.orders
+      (tenant_id, order_number, shipping_address, contact_name, contact_phone,
+       subtotal_centavos, grand_total_centavos, payment_method, payment_status,
+       fulfillment_status, source)
+      values (%L, 'MP-17-C', '{}'::jsonb, 'Ana', '+639181234567',
+              0, 0, 'cod', 'unpaid', 'pending', 'storefront') $q$, i.rhea_tenant)),
+    1::bigint,
+    'while two storefront orders, which have no marketplace id, still coexist');
+end;
+$$;
+
 set local role authenticated;
 select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
 
@@ -4550,8 +4803,8 @@ declare v_passed int := coalesce(nullif(current_setting('tests.passed', true), '
 begin
   raise notice '';
   raise notice '=== % assertions passed', v_passed;
-  if v_passed < 600 then
-    raise exception 'Expected at least 600 assertions, only % ran — did a section get skipped?', v_passed
+  if v_passed < 635 then
+    raise exception 'Expected at least 635 assertions, only % ran — did a section get skipped?', v_passed
       using errcode = 'triggered_action_exception';
   end if;
 end;

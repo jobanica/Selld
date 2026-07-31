@@ -5,7 +5,7 @@ Build one phase per session, in order. The full roadmap is in
 [`docs/build-spec.md`](docs/build-spec.md); who we're building for is in
 [`docs/avatar.md`](docs/avatar.md).
 
-**Current state: phase 16 complete.** Next up is phase 17 (analytics & reporting).
+**Current state: phase 17 complete.** Next up is phase 18 (analytics & true profit).
 
 ---
 
@@ -249,6 +249,16 @@ What follows from that:
   all**: a per-click log with timestamps is a browsing history, and nothing in the
   product needs to read one row of it.
 
+- **Phase 17 has no new boundary, and that is the point.** A marketplace token
+  is the same class of secret as a page access token, so `marketplace_connections`
+  gets the same treatment: RLS on, **no policy at all**, no `select` grant, and
+  the token encrypted under a key from the server's environment.
+  `marketplace_connections_safe` derives "connected" and "expired" without
+  carrying it, and a CI step asserts no client role can reach it. The sync
+  functions split the same way everything else does — `marketplace_push_claim`,
+  `marketplace_push_record` and `marketplace_order_ingest` are `service_role`
+  only; what a seller presses goes through checked wrappers.
+
 **`cart_pricing()` is the only place money is computed.** The quote the buyer sees
 and the order that gets written both go through it, so they cannot disagree.
 `cart_items.unit_price_centavos` is a display snapshot and is never charged —
@@ -267,7 +277,7 @@ src/
   storefront/   ← public buyer surface, own perf budget
   features/     ← feature slices; may import from core and lib
     address/ auth/ broadcasts/ catalog/ cod/ customers/ inbox/ inventory/ live/
-    onboarding/ orders/ tenancy/
+    marketplaces/ onboarding/ orders/ tenancy/
   lib/          ← money, phone, psgc, i18n, time, supabase, tenant
   components/ui ← shadcn/ui primitives
 ```
@@ -601,6 +611,50 @@ one new file plus one registry line, and zero lines of order logic.
   that maintain it. The suite re-runs the same writes as the owner, where only
   the trigger stands in the way. Check the SQLSTATE: 42501 is a grant, 23514 is
   the guard.
+- **Push *available*, not *on hand*.** A buyer who reaches the confirmation page
+  has raised `reserved`, not lowered `on_hand` — the parcel has not shipped. A
+  marketplace sync watching `on_hand` fires when the parcel goes out the door,
+  hours or days later, and the marketplace happily sells the same unit in
+  between. The trigger is `after insert or update of on_hand, reserved`, and
+  `marketplace_sellable()` sums `available_stock()` across locations.
+- **Coalesce, do not debounce.** A literal debounce resets its timer on every
+  event, so a store taking a sale a second never pushes *while it is busy* —
+  which is exactly when the number matters. `marketplace_stock_queue` is unique
+  on `listing_id` and `on conflict do nothing`, so the deadline runs from the
+  *first* movement of a burst, and the figure is read at claim time rather than
+  captured at enqueue time.
+- **`now()` inside a trigger is the transaction timestamp**, so every movement in
+  one transaction schedules the same instant — which made a debounce and a
+  coalesce indistinguishable and hid the difference from the sabotage written to
+  tell them apart. Use `clock_timestamp()` when the value is a deadline.
+- **A message written into a row at import time is a message no locale reaches.**
+  `marketplace_issues.message` held an English sentence and the screen rendered
+  it, so the queue stayed English in Taglish — hard rule 5, broken before anyone
+  thought about the locale because the string was already written. Translate from
+  the row's *kind*; keep the stored sentence for logs and support.
+- **Two guards for one rule means a test can pass with either one deleted.**
+  `marketplace_map_listing` refuses a duplicate mapping *and* a unique index
+  refuses it, so asserting "it was rejected" passed with the function's own check
+  removed — and the seller would have got a constraint name instead of a
+  sentence. Assert the message, not the rejection.
+- **Match listings on SKU and only on SKU.** Matching on name is the tempting
+  extra mile: "Rosehip Serum 30ml" and "Rosehip Serum 30 ml" are one product to a
+  person and two rows to anything mechanical, and a mis-matched listing pushes
+  one product's stock onto another's — overselling one and hiding the other. An
+  SKU is a thing the seller typed on both sides on purpose.
+- **A harness that shares a database with one that commits needs its own
+  fixture.** The phase-17 probe used fixed SKUs, collided with rows the e2e had
+  committed, and failed at fixture time — so the sabotage sweep reported sixteen
+  guards caught having exercised none of them. When a sweep comes back all-green,
+  suspect the baseline before believing it.
+- **Backticks and double quotes inside a CI step's SQL are shell syntax.** The
+  step body is `psql -c "…"`, so a comment containing `"malformed array literal"`
+  ends the string and the rest of the SQL becomes stray arguments, and a comment
+  containing backticks runs a command. Both fail with an error that names neither.
+- **`text[] || 'a, b'` is array concatenation, not an append.** An untyped literal
+  next to a text array is parsed as an array literal, so a diagnostic message
+  containing a comma fails as *malformed array literal* instead of being
+  reported. Cast the element: `leaked || 'message'::text`.
 
 ## Package manager
 

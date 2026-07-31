@@ -312,7 +312,14 @@ jobs:
                 'broadcast_render', 'short_link_create',
                 'abandoned_carts_sweep', 'abandoned_carts_due',
                 'abandoned_cart_record_reminder', 'abandoned_carts_report',
-                'sms_segments'
+                'sms_segments',
+                'marketplace_credentials', 'set_marketplace_credentials',
+                'marketplace_push_claim', 'marketplace_push_record',
+                'marketplace_order_ingest', 'marketplace_listings_import',
+                'marketplace_connections_due', 'marketplace_sellable',
+                'marketplace_connect', 'marketplace_set_sync',
+                'marketplace_map_listing', 'marketplace_overview',
+                'marketplace_issue_resolve'
               ]
               loop
                 if exists (
@@ -373,7 +380,11 @@ jobs:
                 'broadcast_claim_next', 'broadcast_record_send', 'short_link_create',
                 'short_link_follow', 'broadcasts_due', 'abandoned_carts_sweep',
                 'abandoned_carts_due', 'abandoned_cart_record_reminder',
-                'discount_evaluate', 'discount_auto_best', 'cart_apply_discount'
+                'discount_evaluate', 'discount_auto_best', 'cart_apply_discount',
+                'marketplace_credentials', 'set_marketplace_credentials',
+                'marketplace_push_claim', 'marketplace_push_record',
+                'marketplace_order_ingest', 'marketplace_listings_import',
+                'marketplace_connections_due', 'marketplace_sellable'
               ]
               loop
                 if exists (
@@ -700,6 +711,120 @@ jobs:
               end;
 
               raise notice 'voucher and broadcast counters are projections OK';
+              raise exception 'rollback';
+            exception when others then
+              if sqlerrm <> 'rollback' then raise; end if;
+            end
+            \$\$;
+          "
+
+      # A marketplace access token can list, reprice and cancel as the seller,
+      # which puts it in the same class as a page access token. `social_accounts`
+      # earned its own CI step for that; this is the same check for the same
+      # reason, and it is mechanical because "no policy at all" is the kind of
+      # thing a later migration adds one to without noticing.
+      - name: Marketplace access tokens are unreadable by any client role
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h 127.0.0.1 -p 54322 -U postgres -v ON_ERROR_STOP=1 -c "
+            do \$\$
+            declare
+              r text;
+              leaked text[] := '{}';
+            begin
+              foreach r in array array['anon', 'authenticated'] loop
+                if has_table_privilege(r, 'public.marketplace_connections', 'SELECT') then
+                  leaked := leaked || (r || ' can select marketplace_connections')::text;
+                end if;
+                if has_function_privilege(r, 'public.marketplace_credentials(uuid, text)', 'EXECUTE') then
+                  leaked := leaked || (r || ' can execute marketplace_credentials')::text;
+                end if;
+              end loop;
+
+              -- RLS on and no policy at all, the same shape as social_accounts.
+              if not (select relrowsecurity from pg_class
+                      where oid = 'public.marketplace_connections'::regclass) then
+                leaked := leaked || 'RLS is off on marketplace_connections'::text;
+              end if;
+              if exists (select 1 from pg_policies
+                         where schemaname = 'public' and tablename = 'marketplace_connections') then
+                -- Cast to text. Without it, appending an untyped literal to a
+                -- text array resolves to array-concatenation and the literal is
+                -- parsed as an array, so a message containing a comma fails as a
+                -- malformed array literal instead of saying what is wrong.
+                --
+                -- No double quotes or backticks in these comments either: this
+                -- SQL lives inside a double-quoted shell string, where the first
+                -- ends it and the second is command substitution.
+                leaked := leaked || 'marketplace_connections has a policy; a client role could read the token'::text;
+              end if;
+
+              -- And the safe view must not have grown a column that carries one.
+              if exists (
+                select 1 from information_schema.columns
+                where table_schema = 'public' and table_name = 'marketplace_connections_safe'
+                  and column_name in ('credentials_encrypted', 'access_token', 'refresh_token')
+              ) then
+                leaked := leaked || 'marketplace_connections_safe exposes a credential column'::text;
+              end if;
+
+              if array_length(leaked, 1) > 0 then
+                raise exception 'Marketplace credentials are reachable: %',
+                  array_to_string(leaked, '; ');
+              end if;
+              raise notice 'marketplace access tokens are unreadable by any client role OK';
+            end
+            \$\$;
+          "
+
+      # One marketplace order id can only ever be one Selld order. A pull is
+      # repeated by design — the worker asks "anything since 09:00" every few
+      # minutes — so without this index a retry, or a second worker, packs the
+      # parcel twice. `orders.channel_ref` existed since phase 6 and nothing had
+      # ever written it, so nothing had ever needed it to be unique.
+      - name: A marketplace order cannot be packed twice
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h 127.0.0.1 -p 54322 -U postgres -v ON_ERROR_STOP=1 -c "
+            do \$\$
+            declare v_tenant uuid;
+            begin
+              insert into public.tenants (name, slug, status)
+              values ('CI Marketplace', 'ci-mp', 'active') returning id into v_tenant;
+
+              insert into public.orders
+                (tenant_id, order_number, shipping_address, contact_name, contact_phone,
+                 subtotal_centavos, grand_total_centavos, payment_method, payment_status,
+                 fulfillment_status, source, channel_ref)
+              values (v_tenant, 'M1', '{}'::jsonb, 'Buyer', '+639171230003', 0, 0,
+                      'cod', 'unpaid', 'pending', 'marketplace', 'SPE-CI-1');
+
+              begin
+                insert into public.orders
+                  (tenant_id, order_number, shipping_address, contact_name, contact_phone,
+                   subtotal_centavos, grand_total_centavos, payment_method, payment_status,
+                   fulfillment_status, source, channel_ref)
+                values (v_tenant, 'M2', '{}'::jsonb, 'Buyer', '+639171230003', 0, 0,
+                        'cod', 'unpaid', 'pending', 'marketplace', 'SPE-CI-1');
+                raise exception 'a marketplace order id can be used twice';
+              exception when unique_violation then
+                null;
+              end;
+
+              -- Partial, so storefront orders — which have no marketplace id —
+              -- must still coexist freely.
+              insert into public.orders
+                (tenant_id, order_number, shipping_address, contact_name, contact_phone,
+                 subtotal_centavos, grand_total_centavos, payment_method, payment_status,
+                 fulfillment_status, source)
+              values (v_tenant, 'M3', '{}'::jsonb, 'A', '+639171230004', 0, 0,
+                      'cod', 'unpaid', 'pending', 'storefront'),
+                     (v_tenant, 'M4', '{}'::jsonb, 'B', '+639171230005', 0, 0,
+                      'cod', 'unpaid', 'pending', 'storefront');
+
+              raise notice 'a marketplace order cannot be packed twice OK';
               raise exception 'rollback';
             exception when others then
               if sqlerrm <> 'rollback' then raise; end if;

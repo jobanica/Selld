@@ -30,9 +30,14 @@ import {
 } from './cart-routes'
 import { CART_COOKIE, cartCookie, isSecureRequest } from './cookies'
 import { serveCourierRoutes } from './courier-routes'
-import { serveXenditWebhook } from './payment-webhook'
+import { readServiceConfig, serveXenditWebhook } from './payment-webhook'
 import { serveLiveWebhook } from './live-routes'
 import { serveBroadcastRoutes, serveShortLink } from './broadcast-routes'
+import {
+  registerMarketplaceProviders,
+  serveMarketplaceRoutes,
+  startMarketplaceWorker,
+} from './marketplace-routes'
 import { serveSocialRoutes, serveSocialWebhook } from './social-routes'
 import { serveCourierWebhook } from './tracking'
 import { readSupabaseConfig, rpc, type SupabaseConfig } from './supabase-rpc'
@@ -126,6 +131,14 @@ async function main() {
       },
     )
   })
+
+  // Stock pushes are a background loop rather than a reaction to a request:
+  // nothing HTTP happens when a buyer reserves the last unit, and the deadline
+  // is measured from that moment. Started only where the service role exists,
+  // because without it there is nothing the worker could do but log failures.
+  registerMarketplaceProviders()
+  const service = readServiceConfig()
+  if (service !== null) startMarketplaceWorker(service)
 
   server.listen(PORT, () => {
     console.log(
@@ -317,6 +330,10 @@ async function handle(
   // server-held service role.
   if (await serveBroadcastRoutes(request, response, url)) return
   if (await serveShortLink(response, url)) return
+
+  // Marketplace mapping and sync. A dashboard action needing server-held
+  // credentials, like courier booking, so it lives here for the same reason.
+  if (await serveMarketplaceRoutes(request, response, url)) return
 
   // `.localhost` subdomains resolve to 127.0.0.1 in every modern browser, so
   // `rheas-finds.localhost:5174` exercises the real subdomain path in dev.

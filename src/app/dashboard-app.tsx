@@ -9,6 +9,7 @@ import { RequireAuth } from '@/features/auth/require-auth'
 import { SessionProvider } from '@/features/auth/session-provider'
 import { ProductListPage } from '@/features/catalog/product-list-page'
 import { BroadcastsPage } from '@/features/broadcasts/broadcasts-page'
+import { MarketplacesPage } from '@/features/marketplaces/marketplaces-page'
 import { CodPage } from '@/features/cod/cod-page'
 import { CustomersPage } from '@/features/customers/customers-page'
 import { InboxPage } from '@/features/inbox/inbox-page'
@@ -33,7 +34,7 @@ export default function DashboardApp() {
   // renders a placeholder rather than 404ing.
   const implemented = new Set([
     '/', '/orders', '/products', '/inventory', '/shipping', '/payments', '/cod', '/live',
-    '/inbox', '/customers', '/broadcasts',
+    '/inbox', '/customers', '/broadcasts', '/marketplaces',
   ])
   const pending = ALL_NAV_ITEMS.filter((item) => !implemented.has(item.to))
 
@@ -63,6 +64,7 @@ export default function DashboardApp() {
             <Route path="/inbox" element={<InboxPage />} />
             <Route path="/customers" element={<CustomersPage />} />
             <Route path="/broadcasts" element={<BroadcastsPage />} />
+            <Route path="/marketplaces" element={<MarketplacesPage />} />
             {/* Where the Facebook OAuth callback sends the seller back to. */}
             <Route path="/settings/social" element={<InboxPage />} />
             {pending.map((item) => (

@@ -2098,6 +2098,380 @@ export type Database = {
           },
         ]
       }
+      marketplace_connections: {
+        Row: {
+          connected_at: string | null
+          created_at: string
+          credentials_encrypted: string | null
+          id: string
+          last_error: string | null
+          last_order_pull_at: string | null
+          last_stock_push_at: string | null
+          platform: string
+          shop_id: string
+          shop_name: string | null
+          status: string
+          sync_orders: boolean
+          sync_stock: boolean
+          tenant_id: string
+          token_expires_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          connected_at?: string | null
+          created_at?: string
+          credentials_encrypted?: string | null
+          id?: string
+          last_error?: string | null
+          last_order_pull_at?: string | null
+          last_stock_push_at?: string | null
+          platform: string
+          shop_id: string
+          shop_name?: string | null
+          status?: string
+          sync_orders?: boolean
+          sync_stock?: boolean
+          tenant_id: string
+          token_expires_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          connected_at?: string | null
+          created_at?: string
+          credentials_encrypted?: string | null
+          id?: string
+          last_error?: string | null
+          last_order_pull_at?: string | null
+          last_stock_push_at?: string | null
+          platform?: string
+          shop_id?: string
+          shop_name?: string | null
+          status?: string
+          sync_orders?: boolean
+          sync_stock?: boolean
+          tenant_id?: string
+          token_expires_at?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "marketplace_connections_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marketplace_connections_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      marketplace_issues: {
+        Row: {
+          connection_id: string | null
+          created_at: string
+          detail: Json | null
+          id: string
+          kind: string
+          listing_id: string | null
+          message: string | null
+          reference: string | null
+          resolved_at: string | null
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          connection_id?: string | null
+          created_at?: string
+          detail?: Json | null
+          id?: string
+          kind: string
+          listing_id?: string | null
+          message?: string | null
+          reference?: string | null
+          resolved_at?: string | null
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          connection_id?: string | null
+          created_at?: string
+          detail?: Json | null
+          id?: string
+          kind?: string
+          listing_id?: string | null
+          message?: string | null
+          reference?: string | null
+          resolved_at?: string | null
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "marketplace_issues_tenant_id_connection_id_fkey"
+            columns: ["tenant_id", "connection_id"]
+            isOneToOne: false
+            referencedRelation: "marketplace_connections"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "marketplace_issues_tenant_id_connection_id_fkey"
+            columns: ["tenant_id", "connection_id"]
+            isOneToOne: false
+            referencedRelation: "marketplace_connections_safe"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "marketplace_issues_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marketplace_issues_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marketplace_issues_tenant_id_listing_id_fkey"
+            columns: ["tenant_id", "listing_id"]
+            isOneToOne: false
+            referencedRelation: "marketplace_listings"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
+      marketplace_listings: {
+        Row: {
+          connection_id: string
+          created_at: string
+          external_item_id: string
+          external_sku: string | null
+          external_stock: number | null
+          external_variation_id: string | null
+          id: string
+          is_active: boolean
+          last_pushed_at: string | null
+          last_pushed_stock: number | null
+          name: string | null
+          price_centavos: number | null
+          tenant_id: string
+          updated_at: string
+          variant_id: string | null
+        }
+        Insert: {
+          connection_id: string
+          created_at?: string
+          external_item_id: string
+          external_sku?: string | null
+          external_stock?: number | null
+          external_variation_id?: string | null
+          id?: string
+          is_active?: boolean
+          last_pushed_at?: string | null
+          last_pushed_stock?: number | null
+          name?: string | null
+          price_centavos?: number | null
+          tenant_id: string
+          updated_at?: string
+          variant_id?: string | null
+        }
+        Update: {
+          connection_id?: string
+          created_at?: string
+          external_item_id?: string
+          external_sku?: string | null
+          external_stock?: number | null
+          external_variation_id?: string | null
+          id?: string
+          is_active?: boolean
+          last_pushed_at?: string | null
+          last_pushed_stock?: number | null
+          name?: string | null
+          price_centavos?: number | null
+          tenant_id?: string
+          updated_at?: string
+          variant_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "marketplace_listings_tenant_id_connection_id_fkey"
+            columns: ["tenant_id", "connection_id"]
+            isOneToOne: false
+            referencedRelation: "marketplace_connections"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "marketplace_listings_tenant_id_connection_id_fkey"
+            columns: ["tenant_id", "connection_id"]
+            isOneToOne: false
+            referencedRelation: "marketplace_connections_safe"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "marketplace_listings_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marketplace_listings_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marketplace_listings_tenant_id_variant_id_fkey"
+            columns: ["tenant_id", "variant_id"]
+            isOneToOne: false
+            referencedRelation: "product_variants"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "marketplace_listings_tenant_id_variant_id_fkey"
+            columns: ["tenant_id", "variant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_availability"
+            referencedColumns: ["tenant_id", "variant_id"]
+          },
+          {
+            foreignKeyName: "marketplace_listings_tenant_id_variant_id_fkey"
+            columns: ["tenant_id", "variant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_variants"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
+      marketplace_stock_queue: {
+        Row: {
+          attempts: number
+          created_at: string
+          due_at: string
+          id: string
+          last_error: string | null
+          listing_id: string
+          tenant_id: string
+        }
+        Insert: {
+          attempts?: number
+          created_at?: string
+          due_at?: string
+          id?: string
+          last_error?: string | null
+          listing_id: string
+          tenant_id: string
+        }
+        Update: {
+          attempts?: number
+          created_at?: string
+          due_at?: string
+          id?: string
+          last_error?: string | null
+          listing_id?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "marketplace_stock_queue_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marketplace_stock_queue_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marketplace_stock_queue_tenant_id_listing_id_fkey"
+            columns: ["tenant_id", "listing_id"]
+            isOneToOne: false
+            referencedRelation: "marketplace_listings"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
+      marketplace_sync_logs: {
+        Row: {
+          connection_id: string | null
+          created_at: string
+          direction: string
+          entity: string
+          error: string | null
+          id: string
+          payload: Json | null
+          reference: string | null
+          status: string
+          tenant_id: string
+        }
+        Insert: {
+          connection_id?: string | null
+          created_at?: string
+          direction: string
+          entity: string
+          error?: string | null
+          id?: string
+          payload?: Json | null
+          reference?: string | null
+          status: string
+          tenant_id: string
+        }
+        Update: {
+          connection_id?: string | null
+          created_at?: string
+          direction?: string
+          entity?: string
+          error?: string | null
+          id?: string
+          payload?: Json | null
+          reference?: string | null
+          status?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "marketplace_sync_logs_tenant_id_connection_id_fkey"
+            columns: ["tenant_id", "connection_id"]
+            isOneToOne: false
+            referencedRelation: "marketplace_connections"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "marketplace_sync_logs_tenant_id_connection_id_fkey"
+            columns: ["tenant_id", "connection_id"]
+            isOneToOne: false
+            referencedRelation: "marketplace_connections_safe"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "marketplace_sync_logs_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marketplace_sync_logs_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       media_assets: {
         Row: {
           created_at: string
@@ -4864,6 +5238,78 @@ export type Database = {
           },
         ]
       }
+      marketplace_connections_safe: {
+        Row: {
+          connected_at: string | null
+          created_at: string | null
+          has_credentials: boolean | null
+          id: string | null
+          last_error: string | null
+          last_order_pull_at: string | null
+          last_stock_push_at: string | null
+          platform: string | null
+          shop_id: string | null
+          shop_name: string | null
+          status: string | null
+          sync_orders: boolean | null
+          sync_stock: boolean | null
+          tenant_id: string | null
+          token_expired: boolean | null
+          updated_at: string | null
+        }
+        Insert: {
+          connected_at?: string | null
+          created_at?: string | null
+          has_credentials?: never
+          id?: string | null
+          last_error?: string | null
+          last_order_pull_at?: string | null
+          last_stock_push_at?: string | null
+          platform?: string | null
+          shop_id?: string | null
+          shop_name?: string | null
+          status?: string | null
+          sync_orders?: boolean | null
+          sync_stock?: boolean | null
+          tenant_id?: string | null
+          token_expired?: never
+          updated_at?: string | null
+        }
+        Update: {
+          connected_at?: string | null
+          created_at?: string | null
+          has_credentials?: never
+          id?: string | null
+          last_error?: string | null
+          last_order_pull_at?: string | null
+          last_stock_push_at?: string | null
+          platform?: string | null
+          shop_id?: string | null
+          shop_name?: string | null
+          status?: string | null
+          sync_orders?: boolean | null
+          sync_stock?: boolean | null
+          tenant_id?: string | null
+          token_expired?: never
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "marketplace_connections_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "marketplace_connections_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       payment_accounts_safe: {
         Row: {
           connected_at: string | null
@@ -5777,6 +6223,57 @@ export type Database = {
         }
         Returns: undefined
       }
+      marketplace_connect: {
+        Args: {
+          p_platform: string
+          p_shop_id: string
+          p_shop_name?: string
+          p_tenant_id: string
+        }
+        Returns: string
+      }
+      marketplace_connections_due: { Args: never; Returns: Json }
+      marketplace_credentials: {
+        Args: { p_connection_id: string; p_key: string }
+        Returns: Json
+      }
+      marketplace_issue_resolve: {
+        Args: { p_issue_id: string }
+        Returns: undefined
+      }
+      marketplace_listings_import: {
+        Args: { p_connection_id: string; p_listings: Json }
+        Returns: Json
+      }
+      marketplace_map_listing: {
+        Args: { p_listing_id: string; p_variant_id?: string }
+        Returns: Json
+      }
+      marketplace_order_ingest: {
+        Args: { p_connection_id: string; p_order: Json }
+        Returns: Json
+      }
+      marketplace_overview: { Args: { p_tenant_id: string }; Returns: Json }
+      marketplace_push_claim: { Args: { p_limit?: number }; Returns: Json }
+      marketplace_push_record: {
+        Args: {
+          p_attempts?: number
+          p_error?: string
+          p_listing_id: string
+          p_status: string
+          p_stock?: number
+        }
+        Returns: undefined
+      }
+      marketplace_sellable: { Args: { p_variant_id: string }; Returns: number }
+      marketplace_set_sync: {
+        Args: {
+          p_connection_id: string
+          p_sync_orders?: boolean
+          p_sync_stock?: boolean
+        }
+        Returns: Json
+      }
       message_send_allowed: {
         Args: { p_automated?: boolean; p_tag?: string; p_thread_id: string }
         Returns: Json
@@ -6100,6 +6597,15 @@ export type Database = {
           p_credentials: Json
           p_key: string
           p_tenant_id: string
+        }
+        Returns: undefined
+      }
+      set_marketplace_credentials: {
+        Args: {
+          p_connection_id: string
+          p_credentials: Json
+          p_expires_at?: string
+          p_key: string
         }
         Returns: undefined
       }

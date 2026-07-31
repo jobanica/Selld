@@ -22,6 +22,7 @@ export const en = {
     payments: 'Payments',
     cod: 'COD & returns',
     shipping: 'Shipping',
+    marketplaces: 'Marketplaces',
     analytics: 'Analytics',
     settings: 'Settings',
   },
@@ -774,6 +775,74 @@ export const en = {
     errorBadBody: 'A message is between 1 and 900 characters.',
     errorNotAllowed: 'You do not have permission to send for this store.',
     errorNotConfigured: 'Sending is not set up on this server yet.',
+    errorUnknown: 'Something went wrong. Please try again.',
+  },
+  marketplaces: {
+    title: 'Marketplaces',
+    subtitle: 'Keep Shopee and Lazada in step with your stock, and pack their orders here.',
+
+    statusConnected: 'Connected',
+    statusDisconnected: 'Not connected',
+    statusExpired: 'Sign in again',
+    statusError: 'Needs attention',
+    shopLine: '{{platform}} · shop {{shopId}}',
+
+    mappedRatio: '{{mapped}} of {{total}} linked',
+    mappedWarning_one:
+      '{{count}} listing is not linked to a product, so its stock is not being kept in step.',
+    mappedWarning_other:
+      '{{count}} listings are not linked to a product, so their stock is not being kept in step.',
+    mappedAllGood: 'Every listing is linked. Stock stays in step on its own.',
+    neverPushed: 'Nothing pushed yet.',
+    lastPushed: 'Last pushed {{when}}',
+
+    stockSyncOn: 'Stock sync is on',
+    stockSyncOff: 'Stock sync is off',
+    orderSyncOn: 'Order sync is on',
+    orderSyncOff: 'Order sync is off',
+    importListings: 'Get listings',
+    importing: 'Getting listings…',
+
+    listingsTitle: 'Listings',
+    listingsSubtitle: 'Link each one to the product it sells. Unlinked ones are at the top.',
+    notLinked: 'Not linked',
+    notLinkedOption: '— not linked —',
+    linkTo: 'Link this listing to a product',
+    sellableNow_one: '{{count}} to sell',
+    sellableNow_other: '{{count}} to sell',
+    lastToldThem_one: 'Told them {{count}} on {{when}}',
+    lastToldThem_other: 'Told them {{count}} on {{when}}',
+
+    issuesTitle_one: '{{count}} thing to sort out',
+    issuesTitle_other: '{{count}} things to sort out',
+    issuesSubtitle: 'Each of these is stock that is not being kept in step.',
+    issueMessage_unmapped_listing:
+      'This listing is not linked to a product, so its stock is not being kept in step.',
+    issueMessage_unmapped_sku:
+      'An order arrived for an item that is not linked to a product, so its stock was not deducted.',
+    issueMessage_push_rejected: 'The marketplace has refused this stock update repeatedly.',
+    issueMessage_order_conflict: 'An order came in that we cannot reconcile with one we hold.',
+    issue_unmapped_listing: 'Not linked',
+    issue_unmapped_sku: 'Unknown item',
+    issue_push_rejected: 'Refused',
+    issue_order_conflict: 'Conflict',
+    issueDismiss: 'Dismiss',
+
+    connectTitle: 'Connect a shop',
+    connectSubtitle: 'Add the shop, then sign in to it to finish.',
+    platformLabel: 'Marketplace',
+    shopIdLabel: 'Shop ID',
+    shopNameLabel: 'What you call it',
+    connectAction: 'Add shop',
+    connectHint:
+      'Adding it here is the first half. Signing in to the marketplace stores the keys on the server — they are never sent to this browser.',
+
+    errorAlreadyMapped: 'Another listing on this shop is already linked to that product.',
+    errorNotAllowed: 'You do not have permission to change this store’s marketplaces.',
+    errorNotConfigured: 'Marketplace sync is not set up on this server yet.',
+    errorNoProvider: 'This server is not set up for that marketplace.',
+    errorNoCredentials: 'Sign in to the marketplace first.',
+    errorNeedsCredentials: 'Sign in to the marketplace before switching sync on.',
     errorUnknown: 'Something went wrong. Please try again.',
   },
   customers: {

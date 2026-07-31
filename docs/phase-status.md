@@ -1654,3 +1654,83 @@ the Page this morning, and a few not reachable at all:
 
 **Gate:** `pnpm verify` (501 tests), `pnpm db:test` (608 assertions),
 `pnpm db:test:concurrency`. All 21 migrations apply from scratch on PG 17.6.
+
+---
+
+## Phase 17 — Marketplace sync
+
+**Done when:** selling the last unit on the Selld storefront zeroes the Shopee
+listing within 60 seconds.
+
+**Measured** over real HTTP, against a fake Shopee that holds a listing's stock
+the way the real one does. A buyer went through the storefront's own form
+endpoints — no JSON API, because that surface has none — and the proof then
+watched *Shopee's* number rather than anything of ours:
+
+| | |
+|---|---|
+| store has | 2 units of the 30ml, listing linked by SKU |
+| buyer takes | both, on the real storefront |
+| Shopee's listing reached zero | **2.3s** after checkout |
+| budget | 60s |
+| what was sent | an absolute `0`, signed, against item 1 / model 11 |
+| the other listing | untouched |
+| three movements in a burst | one push, carrying the number after all three |
+
+And back the other way: a Shopee order became a Selld order with
+`source='marketplace'`, its unit left the shared pool, and pulling twice did not
+pack it twice.
+
+### What shipped
+
+- **`MarketplaceProvider` for Shopee and Lazada**, signed correctly for each —
+  Shopee over a path, Lazada over every parameter sorted and upper-cased — with
+  the 200-carrying-an-error rule both platforms need, batched pushes, token
+  refresh, and one item's failure not taking the batch down with it.
+- **Product/SKU mapping** with auto-match on SKU and only on SKU, a re-import
+  that cannot undo a mapping a seller made by hand, and a constraint that stops
+  two listings on one shop sharing a product.
+- **One-way stock push**, driven by a trigger on `inventory_levels` and drained
+  by a worker every two seconds. What is pushed is `available` — on hand minus
+  reserved — so the number moves when a buyer *reserves* the last unit rather
+  than when the parcel ships days later.
+- **Order pull** into `orders` with `source='marketplace'` and the marketplace's
+  own id in `channel_ref`, idempotent against a unique index, recording a stock
+  movement so every *other* channel is told.
+- **A conflict and mapping-error queue** — unlinked listings, orders for items
+  nobody linked, listings the marketplace keeps refusing — surfaced as work on
+  the marketplace screen rather than logged and dropped.
+
+### Notable findings
+
+| Symptom | Cause |
+|---|---|
+| The whole sabotage sweep reported 16 of 16 caught, having exercised none of them | The probe's fixture used fixed SKUs and collided with rows an earlier e2e run had committed, so it failed at fixture time — identically with and without a sabotage applied. The probe now generates its own SKUs and clears the tenant's marketplaces inside the transaction it rolls back. Same lesson as phase 16's un-biting sabotage, one layer further out: when a sweep comes back all-green, suspect the baseline. |
+| A real debounce and a leading-edge coalesce were indistinguishable | The trigger scheduled with `now()`, which is the *transaction* timestamp, so every movement inside one transaction scheduled the same instant. `clock_timestamp()` both makes the property testable and is simply more accurate. |
+| Unlinking a listing left a clean queue and a listing quietly overselling | `marketplace_map_listing(id, null)` returned without re-opening the `unmapped_listing` issue. Unlinking is a decision with a consequence, not a tidy-up. |
+| The queue rendered English on a Taglish screen | The issue message was written into the database at import time and rendered from the row, so hard rule 5 was broken before anyone thought about the locale. The screen now translates from `kind`; the stored sentence is for logs and support. |
+| A second listing pointing at a linked product got a constraint name | The unique index caught it, which meant the assertion "it was rejected" passed with the function's own check deleted. `marketplace_map_listing` now raises `already_mapped`, and the probe asserts the message rather than the rejection. |
+| `orders.channel_ref` had existed since phase 6 with nothing unique about it | Nothing had ever written it. Idempotency for a repeated pull cannot be a check-then-insert; it is now a partial unique index, and the ingest survives losing the race. |
+
+### Deliberately deferred
+
+- **TikTok Shop.** The spec says "Shopee and Lazada first, TikTok Shop second".
+  The platform is in the enum and the provider interface fits it; what is missing
+  is the provider, and it should be written against a real developer account
+  rather than guessed at from documentation.
+- **No OAuth flow.** `marketplace_connect` records the shop and
+  `set_marketplace_credentials` stores the token, both of which work; the
+  browser round trip that gets the seller from one to the other is a per-platform
+  redirect dance and belongs with real partner credentials.
+- **No price or listing push.** Stock only, which is what the done-when asks for
+  and what prevents the double-sell. Pushing prices means deciding who wins when
+  a seller edits one on Shopee, and that is a two-way question this phase
+  deliberately does not open.
+- **The worker is an interval in the storefront process.** Fine for one process
+  and correct under `for update skip locked` for several; a real scheduler is
+  phase 21's job runner, along with the broadcast and abandoned-cart timers
+  phase 16 left in the same state.
+
+**Gate:** `pnpm verify` (517 tests), `pnpm db:test` (642 assertions),
+`pnpm db:test:concurrency`. All 22 migrations apply from scratch on PG 17.6.
+Sixteen sabotages of the phase-17 guards, each caught by the probe.

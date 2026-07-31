@@ -45,6 +45,7 @@ export const tl: Translations = {
     payments: 'Payments',
     cod: 'COD at returns',
     shipping: 'Shipping',
+    marketplaces: 'Mga Marketplace',
     analytics: 'Analytics',
     settings: 'Settings',
   },
@@ -795,6 +796,74 @@ export const tl: Translations = {
     errorBadBody: 'Ang mensahe ay 1 hanggang 900 characters.',
     errorNotAllowed: 'Walang permission ang account mo para mag-send para sa store na ito.',
     errorNotConfigured: 'Hindi pa naka-setup ang pagpapadala sa server na ito.',
+    errorUnknown: 'May naging problema. Subukan mo ulit.',
+  },
+  marketplaces: {
+    title: 'Mga Marketplace',
+    subtitle: 'Panatilihing tama ang stock sa Shopee at Lazada, at dito na i-pack ang orders nila.',
+
+    statusConnected: 'Naka-connect',
+    statusDisconnected: 'Hindi naka-connect',
+    statusExpired: 'Mag-sign in ulit',
+    statusError: 'May problema',
+    shopLine: '{{platform}} · shop {{shopId}}',
+
+    mappedRatio: '{{mapped}} sa {{total}} ang naka-link',
+    mappedWarning_one:
+      '{{count}} listing ang walang kalink na produkto, kaya hindi sinusunod ang stock nito.',
+    mappedWarning_other:
+      '{{count}} listing ang walang kalink na produkto, kaya hindi sinusunod ang stock nito.',
+    mappedAllGood: 'Lahat ng listing ay naka-link. Kusa nang tama ang stock.',
+    neverPushed: 'Wala pang na-push.',
+    lastPushed: 'Huling push {{when}}',
+
+    stockSyncOn: 'Naka-on ang stock sync',
+    stockSyncOff: 'Naka-off ang stock sync',
+    orderSyncOn: 'Naka-on ang order sync',
+    orderSyncOff: 'Naka-off ang order sync',
+    importListings: 'Kunin ang listings',
+    importing: 'Kinukuha ang listings…',
+
+    listingsTitle: 'Mga Listing',
+    listingsSubtitle: 'I-link ang bawat isa sa produktong binebenta nito. Nasa taas ang walang link.',
+    notLinked: 'Walang link',
+    notLinkedOption: '— walang link —',
+    linkTo: 'I-link ang listing na ito sa produkto',
+    sellableNow_one: '{{count}} pang pwedeng ibenta',
+    sellableNow_other: '{{count}} pang pwedeng ibenta',
+    lastToldThem_one: 'Sinabihan sila ng {{count}} noong {{when}}',
+    lastToldThem_other: 'Sinabihan sila ng {{count}} noong {{when}}',
+
+    issuesTitle_one: '{{count}} bagay ang dapat ayusin',
+    issuesTitle_other: '{{count}} bagay ang dapat ayusin',
+    issuesSubtitle: 'Bawat isa dito ay stock na hindi sinusunod.',
+    issueMessage_unmapped_listing:
+      'Walang kalink na produkto ang listing na ito, kaya hindi sinusunod ang stock nito.',
+    issueMessage_unmapped_sku:
+      'May dumating na order para sa item na walang kalink na produkto, kaya walang nabawas na stock.',
+    issueMessage_push_rejected: 'Paulit-ulit na tinatanggihan ng marketplace ang update na ito.',
+    issueMessage_order_conflict: 'May dumating na order na hindi tugma sa hawak natin.',
+    issue_unmapped_listing: 'Walang link',
+    issue_unmapped_sku: 'Hindi kilalang item',
+    issue_push_rejected: 'Tinanggihan',
+    issue_order_conflict: 'Conflict',
+    issueDismiss: 'I-dismiss',
+
+    connectTitle: 'Mag-connect ng shop',
+    connectSubtitle: 'Idagdag ang shop, tapos mag-sign in doon para matapos.',
+    platformLabel: 'Marketplace',
+    shopIdLabel: 'Shop ID',
+    shopNameLabel: 'Ano ang tawag mo dito',
+    connectAction: 'Idagdag ang shop',
+    connectHint:
+      'Ang pagdagdag dito ay kalahati pa lang. Ang pag-sign in sa marketplace ang nag-iimbak ng keys sa server — hindi ito naipapadala sa browser na ito.',
+
+    errorAlreadyMapped: 'May ibang listing na sa shop na ito ang naka-link sa produktong iyan.',
+    errorNotAllowed: 'Walang permission ang account mo para baguhin ang marketplaces ng store na ito.',
+    errorNotConfigured: 'Hindi pa naka-setup ang marketplace sync sa server na ito.',
+    errorNoProvider: 'Hindi pa naka-setup ang server para sa marketplace na iyan.',
+    errorNoCredentials: 'Mag-sign in muna sa marketplace.',
+    errorNeedsCredentials: 'Mag-sign in sa marketplace bago i-on ang sync.',
     errorUnknown: 'May naging problema. Subukan mo ulit.',
   },
   customers: {
