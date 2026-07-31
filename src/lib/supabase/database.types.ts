@@ -1966,6 +1966,88 @@ export type Database = {
         }
         Relationships: []
       }
+      shipment_events: {
+        Row: {
+          created_at: string
+          description: string | null
+          id: string
+          location: string | null
+          occurred_at: string
+          raw: Json | null
+          raw_code: string
+          shipment_id: string
+          source: string
+          status: string
+          tenant_id: string
+        }
+        Insert: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          location?: string | null
+          occurred_at: string
+          raw?: Json | null
+          raw_code: string
+          shipment_id: string
+          source?: string
+          status: string
+          tenant_id: string
+        }
+        Update: {
+          created_at?: string
+          description?: string | null
+          id?: string
+          location?: string | null
+          occurred_at?: string
+          raw?: Json | null
+          raw_code?: string
+          shipment_id?: string
+          source?: string
+          status?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shipment_events_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shipment_events_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shipment_events_tenant_id_shipment_id_fkey"
+            columns: ["tenant_id", "shipment_id"]
+            isOneToOne: false
+            referencedRelation: "shipments"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
+      shipment_status_map: {
+        Row: {
+          notify_event: string | null
+          order_status: string | null
+          shipment_status: string
+        }
+        Insert: {
+          notify_event?: string | null
+          order_status?: string | null
+          shipment_status: string
+        }
+        Update: {
+          notify_event?: string | null
+          order_status?: string | null
+          shipment_status?: string
+        }
+        Relationships: []
+      }
       shipments: {
         Row: {
           booked_at: string
@@ -2300,6 +2382,64 @@ export type Database = {
           },
         ]
       }
+      sms_credit_entries: {
+        Row: {
+          balance_after: number
+          created_at: string
+          delta: number
+          id: string
+          note: string | null
+          reason: string
+          seq: number
+          sms_log_id: string | null
+          tenant_id: string
+        }
+        Insert: {
+          balance_after: number
+          created_at?: string
+          delta: number
+          id?: string
+          note?: string | null
+          reason: string
+          seq?: never
+          sms_log_id?: string | null
+          tenant_id: string
+        }
+        Update: {
+          balance_after?: number
+          created_at?: string
+          delta?: number
+          id?: string
+          note?: string | null
+          reason?: string
+          seq?: never
+          sms_log_id?: string | null
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sms_credit_entries_sms_log_id_fkey"
+            columns: ["sms_log_id"]
+            isOneToOne: false
+            referencedRelation: "sms_logs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sms_credit_entries_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sms_credit_entries_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sms_logs: {
         Row: {
           body: string
@@ -2364,6 +2504,54 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "orders"
             referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
+      sms_templates: {
+        Row: {
+          body: string
+          created_at: string
+          event: string
+          id: string
+          is_enabled: boolean
+          locale: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          body: string
+          created_at?: string
+          event: string
+          id?: string
+          is_enabled?: boolean
+          locale?: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          body?: string
+          created_at?: string
+          event?: string
+          id?: string
+          is_enabled?: boolean
+          locale?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sms_templates_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sms_templates_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -3303,6 +3491,14 @@ export type Database = {
         }
       }
       current_tenant_id: { Args: never; Returns: string }
+      default_sms_templates: {
+        Args: never
+        Returns: {
+          body: string
+          event: string
+          locale: string
+        }[]
+      }
       has_tenant_role: {
         Args: {
           p_min_role: Database["public"]["Enums"]["tenant_role"]
@@ -3402,6 +3598,10 @@ export type Database = {
         Returns: Json
       }
       ph_national_digits: { Args: { p_input: string }; Returns: string }
+      public_tracking: {
+        Args: { p_domain: string; p_order_number: string; p_slug: string }
+        Returns: Json
+      }
       quote_shipping: {
         Args: {
           p_city_code: string
@@ -3481,6 +3681,20 @@ export type Database = {
         }
         Returns: Json
       }
+      record_shipment_event: {
+        Args: {
+          p_courier: string
+          p_description?: string
+          p_location?: string
+          p_occurred_at: string
+          p_raw?: Json
+          p_raw_code: string
+          p_source?: string
+          p_status: string
+          p_waybill: string
+        }
+        Returns: Json
+      }
       record_stock_movement: {
         Args: {
           p_delta: number
@@ -3493,6 +3707,21 @@ export type Database = {
           p_variant_id: string
         }
         Returns: string
+      }
+      record_tracking_sms: {
+        Args: {
+          p_body: string
+          p_cost?: number
+          p_event: string
+          p_order_id: string
+          p_provider: string
+          p_provider_ref: string
+          p_segments?: number
+          p_status: string
+          p_tenant_id: string
+          p_to: string
+        }
+        Returns: Json
       }
       release_reservation: {
         Args: { p_items: Json; p_location_id: string; p_tenant_id: string }
@@ -3570,6 +3799,26 @@ export type Database = {
       }
       shipment_labels: {
         Args: { p_order_ids: string[]; p_tenant_id: string }
+        Returns: Json
+      }
+      shipments_to_poll: {
+        Args: { p_limit?: number; p_stale_after?: string }
+        Returns: Json
+      }
+      sms_credit_balance: { Args: { p_tenant_id: string }; Returns: number }
+      sms_credit_balance_raw: { Args: { p_tenant_id: string }; Returns: number }
+      sms_credit_move: {
+        Args: {
+          p_delta: number
+          p_note?: string
+          p_reason: string
+          p_sms_log_id?: string
+          p_tenant_id: string
+        }
+        Returns: number
+      }
+      sms_render_for_order: {
+        Args: { p_event: string; p_order_id: string; p_root_url: string }
         Returns: Json
       }
       storage_path_tenant_id: { Args: { p_name: string }; Returns: string }

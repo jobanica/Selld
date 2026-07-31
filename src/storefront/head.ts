@@ -74,14 +74,26 @@ export function buildHead({ data, origin, storageOrigin, path }: HeadInput): Hea
   // from the checkout step onward, a name, phone number and address on them. They
   // are noindex, carry no canonical, and get no OG tags — a crawler that indexed a
   // receipt would publish somebody's address.
-  if (data.route === 'cart' || data.route === 'checkout' || data.route === 'order-confirmed') {
+  //
+  // The tracking page is in this list too, and for the same reason rather than a
+  // weaker one: it carries a buyer's first name and destination city, and its URL
+  // contains an order number. A crawler that indexed it would make every order
+  // number in a store enumerable from a search engine.
+  if (
+    data.route === 'cart' ||
+    data.route === 'checkout' ||
+    data.route === 'order-confirmed' ||
+    data.route === 'track'
+  ) {
     const name = data.store?.name ?? 'Selld'
     const title =
       data.route === 'cart'
         ? `Cart · ${name}`
         : data.route === 'checkout'
           ? `Checkout · ${name}`
-          : `Order ${data.receipt.orderNumber} · ${name}`
+          : data.route === 'track'
+            ? `Track ${data.tracking?.orderNumber ?? 'order'} · ${name}`
+            : `Order ${data.receipt.orderNumber} · ${name}`
     return {
       title,
       tags: '<meta name="robots" content="noindex,nofollow" />',

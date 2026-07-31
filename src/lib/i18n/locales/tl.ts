@@ -646,6 +646,43 @@ export const tl: Translations = {
     smsNote: 'Ite-text namin kapag na-ship na ang order mo.',
     keepShopping: 'Magpatuloy sa shopping',
   },
+  tracking: {
+    // Taglish. "Track", "order", "courier" and "delivery" stay in English —
+    // that is what buyers type, and the deep-Tagalog versions read as machine
+    // output on the one page a worried buyer is most likely to open.
+    title: 'I-track ang order mo',
+    forWhom: 'Para kay {{name}} · {{city}}',
+    progress: 'Progress ng delivery',
+    waybill: '{{courier}} tracking number',
+    history: 'Mga update',
+    noEventsYet: 'Wala pang update ang courier. Ite-text ka namin pag meron na.',
+    askStore: 'May tanong? I-message ang {{store}} at sabihin ang order number mo.',
+    notFound: 'Hindi namin makita ang order na iyan',
+    notFoundHint: 'I-check ang order number sa text mo. Isang store lang ang may hawak nito.',
+    step: {
+      confirmed: 'Confirmed',
+      packed: 'Naka-pack',
+      shipped: 'Shipped',
+      delivered: 'Delivered',
+    },
+    status: {
+      pending: 'Hinihintay pa ng store',
+      confirmed: 'Confirmed na ng store',
+      packed: 'Naka-pack na, handa nang i-ship',
+      shipped: 'Kinuha na ng courier',
+      rts: 'Ibinabalik sa store',
+      booked: 'Naka-book na sa courier',
+      picked_up: 'Kinuha na ng courier',
+      in_transit: 'Nasa daan na',
+      out_for_delivery: 'Out for delivery ngayong araw',
+      delivery_failed: 'Hindi na-deliver — susubukan ulit ng courier',
+      returning: 'Pabalik na sa store',
+      returned: 'Naibalik na sa store',
+      delivered: 'Delivered na',
+      cancelled: 'Cancelled',
+      unknown: 'Update ng courier',
+    },
+  },
   storefront: {
     // Taglish, the way sellers and buyers actually type. "Search", "sold out"
     // and "cash on delivery" stay in English because translating them reads as

@@ -184,6 +184,10 @@ function lcpImage(data: StorefrontPage): LcpImage | null {
 function statusFor(data: StorefrontPage): number {
   if (data.route === 'not-found') return 404
   if (data.route === 'product' && data.payload.product === null) return 404
+  // An order number that resolves to nothing is a 404 even though the page still
+  // renders in the store's branding — the status line is what a link checker and a
+  // crawler read, and this URL genuinely has nothing behind it.
+  if (data.route === 'track' && data.tracking === null) return 404
   return 200
 }
 

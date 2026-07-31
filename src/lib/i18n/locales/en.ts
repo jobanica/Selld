@@ -639,6 +639,46 @@ export const en = {
     smsNote: 'We will text you when your order ships.',
     keepShopping: 'Keep shopping',
   },
+  tracking: {
+    // The public tracking page. Buyer-facing, in the store's locale, and written
+    // to be readable standing on a street with one bar of signal.
+    title: 'Track your order',
+    forWhom: 'For {{name}} · {{city}}',
+    progress: 'Delivery progress',
+    waybill: '{{courier}} tracking number',
+    history: 'Updates',
+    noEventsYet: 'No courier updates yet. We will text you the moment there are.',
+    askStore: 'Questions? Message {{store}} and quote your order number.',
+    notFound: 'We could not find that order',
+    notFoundHint:
+      'Check the order number in your confirmation text. It belongs to one store only.',
+    step: {
+      confirmed: 'Confirmed',
+      packed: 'Packed',
+      shipped: 'Shipped',
+      delivered: 'Delivered',
+    },
+    // Courier vocabulary in a buyer's words. `failed_delivery` deliberately says
+    // what to do next rather than only what went wrong — a buyer who reads
+    // "failed" and nothing else messages the seller, which is the whole problem.
+    status: {
+      pending: 'Waiting for the store',
+      confirmed: 'Confirmed by the store',
+      packed: 'Packed and ready',
+      shipped: 'Picked up by the courier',
+      rts: 'Being returned to the store',
+      booked: 'Booked with the courier',
+      picked_up: 'Picked up by the courier',
+      in_transit: 'On the way',
+      out_for_delivery: 'Out for delivery today',
+      delivery_failed: 'Delivery attempt failed — the courier will try again',
+      returning: 'On its way back to the store',
+      returned: 'Returned to the store',
+      delivered: 'Delivered',
+      cancelled: 'Cancelled',
+      unknown: 'Courier update',
+    },
+  },
   storefront: {
     // Shopper-facing copy. Rendered in the *store's* locale, chosen by the
     // seller, not in the buyer's browser language: it is the seller's shop and

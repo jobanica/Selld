@@ -2847,6 +2847,258 @@ set local role authenticated;
 select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
 
 -- ---------------------------------------------------------------------------
+-- Phase 11: tracking and buyer notifications
+-- ---------------------------------------------------------------------------
+-- The new surface here is a page with **no authentication at all**. Everything
+-- below is about the two questions that follow from that: what a stranger holding
+-- an order number can see, and what a seller can be charged for.
+\echo ''
+\echo '=== Phase 11: tracking'
+
+reset role;
+do $$
+declare
+  i record;
+  p record;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p9;
+
+  -- Both stores ship a parcel. Same waybill *number space*, different couriers'
+  -- customers — the point being that neither can see the other's scans.
+  perform public.record_shipment(i.rhea_tenant,   p.rhea_order,   'jnt', 'JT-RHEA-1', 'standard');
+  perform public.record_shipment(i.marlon_tenant, p.marlon_order, 'jnt', 'JT-MARLON-1', 'standard');
+
+  perform public.record_shipment_event('jnt', 'JT-RHEA-1', 'in_transit', '300',
+    now() - interval '5 hours', 'Departed sorting centre', 'Davao Sorting Hub');
+  perform public.record_shipment_event('jnt', 'JT-MARLON-1', 'in_transit', '300',
+    now() - interval '5 hours', 'Departed sorting centre', 'Cebu Sorting Hub');
+
+  create table tests.p11 as
+  select
+    (select order_number from public.orders where id = p.rhea_order)   as rhea_number,
+    (select order_number from public.orders where id = p.marlon_order) as marlon_number,
+    (select contact_name  from public.orders where id = p.rhea_order)   as rhea_buyer;
+  grant select on tests.p11 to authenticated, anon;
+
+  perform tests.pass('phase 11 fixture: one parcel in flight in each tenant');
+end;
+$$;
+
+-- ---- Every new tenant is set up to notify, without being asked --------------
+reset role;
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+
+  -- A seller who has to go and write five SMS templates before tracking works is
+  -- a seller whose tracking does not work.
+  perform tests.eq((select count(*)::int from public.sms_templates
+                     where tenant_id = i.rhea_tenant), 10,
+    'seed_tenant_defaults gave the new tenant a full set of SMS templates');
+  perform tests.ok(public.sms_credit_balance(i.rhea_tenant) > 0,
+    'and enough trial credits to actually send some');
+
+  -- Hard rule: nothing that goes out over SMS may contain the peso sign. One
+  -- `PHP` -> `₱` edit in a template halves the segment budget for every message
+  -- that store ever sends.
+  perform tests.eq(
+    (select count(*)::int from public.sms_templates where body like '%' || U&'\20B1' || '%'), 0,
+    'no default template contains a peso sign, which would force UCS-2');
+
+  -- The ledger is the balance. Asserted rather than assumed: a `balance_after`
+  -- that drifts from the running sum is a bill a seller cannot explain.
+  perform tests.eq(
+    (select coalesce(sum(delta), 0)::int from public.sms_credit_entries
+      where tenant_id = i.rhea_tenant),
+    public.sms_credit_balance(i.rhea_tenant),
+    'the credit ledger sums to the stored balance');
+end;
+$$;
+
+-- ---- Scans and credits are tenant-scoped -----------------------------------
+set local role authenticated;
+select tests.login('22222222-2222-2222-2222-222222222222', 'marlon@example.ph');
+do $$
+declare
+  i record;
+  n record;
+begin
+  select * into i from tests.ids;
+  select * into n from tests.p11;
+
+  perform tests.eq((select count(*)::int from public.shipment_events), 1,
+    'Marlon sees only the scans on his own parcel');
+  perform tests.eq((select count(*)::int from public.shipment_events
+                     where tenant_id = i.rhea_tenant), 0,
+    'and none of Rhea''s, even addressing her tenant by id');
+
+  perform tests.eq((select count(*)::int from public.sms_credit_entries
+                     where tenant_id = i.rhea_tenant), 0,
+    'nor how many credits she has left');
+  -- SECURITY DEFINER bypasses the RLS on the ledger, so the function must do
+  -- its own membership check. Without it this returns her real balance.
+  perform tests.ok(public.sms_credit_balance(i.rhea_tenant) is null,
+    'and sms_credit_balance() tells him nothing either');
+
+  perform tests.eq((select count(*)::int from public.sms_templates
+                     where tenant_id = i.rhea_tenant), 0,
+    'nor what her store says to its buyers');
+
+  -- Writing into her tenant is a WITH CHECK violation, which raises.
+  perform tests.rejects(
+    format($q$ insert into public.sms_templates (tenant_id, event, locale, body)
+               values (%L, 'shipped', 'en', 'pwned') $q$, i.rhea_tenant),
+    'and cannot put words in her store''s mouth');
+end;
+$$;
+
+-- ---- The ledger is readable, never writable --------------------------------
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+
+  -- No INSERT grant at all, so this raises rather than affecting zero rows —
+  -- the distinction phase 9 had to learn on `order_notes`.
+  perform tests.rejects(
+    format($q$ insert into public.sms_credit_entries (tenant_id, delta, balance_after, reason)
+               values (%L, 1000000, 1000000, 'topup') $q$, i.rhea_tenant),
+    'not even an owner can grant herself SMS credits');
+  perform tests.rejects(
+    format($q$ select public.sms_credit_move(%L, 1000000, 'topup') $q$, i.rhea_tenant),
+    'nor move the ledger directly');
+
+  -- Nor can she drive her own orders by inventing courier scans: that is how a
+  -- COD order gets marked delivered without a parcel ever moving.
+  perform tests.rejects(
+    $q$ select public.record_shipment_event('jnt', 'JT-RHEA-1', 'delivered', '500', now()) $q$,
+    'nor record a courier scan herself');
+  perform tests.rejects(
+    format($q$ select public.sms_render_for_order(%L, 'shipped', 'https://x') $q$,
+      (select rhea_order from tests.p9)),
+    'nor render a message on the sending path');
+  perform tests.rejects(
+    $q$ select public.shipments_to_poll() $q$,
+    'and above all cannot enumerate every parcel on the platform');
+
+  -- What she *can* do is edit her own copy.
+  perform tests.eq(
+    tests.affected(
+      format($q$ update public.sms_templates set body = 'Padala na ang order mo {{orderNumber}}.'
+                 where tenant_id = %L and event = 'shipped' and locale = 'tl' $q$, i.rhea_tenant)),
+    1::bigint, 'but an admin may rewrite her store''s own templates');
+end;
+$$;
+
+-- ---- A packer may read the templates, not rewrite them ----------------------
+select tests.login('33333333-3333-3333-3333-333333333333', 'jess@example.ph');
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+
+  perform tests.eq((select count(*)::int from public.sms_templates), 10,
+    'a packer can see what the store texts buyers');
+  -- Blocked by a policy, so it affects zero rows rather than raising.
+  perform tests.eq(
+    tests.affected(
+      format($q$ update public.sms_templates set body = 'hi' where tenant_id = %L $q$,
+        i.rhea_tenant)),
+    0::bigint, 'but cannot change it — that is an admin decision');
+end;
+$$;
+
+-- ---- The public tracking page ----------------------------------------------
+-- The one thing on this surface a buyer may reach, and the whole reason the page
+-- is thin: the order number is the only credential, and order numbers are short,
+-- sequential and forwarded in group chats.
+select tests.logout();
+set local role anon;
+do $$
+declare
+  i record;
+  n record;
+  v_track jsonb;
+  v_other jsonb;
+begin
+  select * into i from tests.ids;
+  select * into n from tests.p11;
+
+  perform tests.rejects($q$ select count(*) from public.shipment_events $q$,
+    'anon has no grant on shipment_events');
+  perform tests.rejects($q$ select count(*) from public.sms_templates $q$,
+    'nor on sms_templates');
+  perform tests.rejects($q$ select count(*) from public.sms_credit_entries $q$,
+    'nor on the credit ledger');
+  perform tests.rejects(
+    $q$ select public.record_shipment_event('jnt', 'JT-RHEA-1', 'delivered', '500', now()) $q$,
+    'and cannot forge a delivery scan');
+  perform tests.rejects(
+    format($q$ select public.record_tracking_sms(%L, %L, 'shipped', '+639171234567',
+                 'x', 'log', null, 'sent', 30, 1) $q$,
+      i.rhea_tenant, (select rhea_order from tests.p9)),
+    'nor spend a seller''s credits by asking for a text');
+  perform tests.rejects(
+    $q$ select public.shipments_to_poll() $q$,
+    'nor list every parcel in flight on the platform');
+
+  -- What they may do:
+  v_track := public.public_tracking('rheas-finds', null, n.rhea_number);
+  perform tests.ok(v_track is not null,
+    'but may track an order by store and order number, with no account');
+  perform tests.eq(v_track ->> 'status', 'shipped',
+    'and it says where the parcel is');
+  perform tests.eq(jsonb_array_length(v_track -> 'events'), 1,
+    'with the courier timeline');
+
+  -- And what that page must never contain. Every one of these was on the order.
+  perform tests.eq((v_track ? 'contactPhone')::int::text, '0',
+    'the page carries no phone number');
+  perform tests.eq((v_track ? 'shippingAddress')::int::text, '0',
+    'nor an address');
+  perform tests.eq((v_track ? 'grandTotal')::int::text, '0',
+    'nor what the buyer paid');
+  perform tests.ok(v_track::text not like '%Rizal%',
+    'nor a street, anywhere in the payload');
+  perform tests.eq(v_track ->> 'firstName', split_part(n.rhea_buyer, ' ', 1),
+    'only the buyer''s first name — enough to recognise your own parcel');
+  perform tests.ok(
+    n.rhea_buyer = split_part(n.rhea_buyer, ' ', 1)
+    or v_track::text not like '%' || split_part(n.rhea_buyer, ' ', 2) || '%',
+    'and never their surname');
+
+  -- Order numbers are allocated per tenant, so they are only unique *within* a
+  -- store. The lookup must therefore be scoped by store and not by number alone.
+  --
+  -- These two assertions are the ones that catch a tenant-blind resolver: both
+  -- numbers exist in the database, on real orders with real timelines, and each
+  -- is asked for on the wrong storefront. A `where order_number = $1` with the
+  -- tenant filter dropped returns the other store's order and its buyer's name.
+  v_other := public.public_tracking('marlon-kicks', null, n.rhea_number);
+  perform tests.ok(v_other is null,
+    'Rhea''s order number does not resolve on Marlon''s storefront');
+  perform tests.ok(
+    public.public_tracking('rheas-finds', null, n.marlon_number) is null,
+    'and not the other way round either');
+  -- Both really do exist, so the nulls above are scoping and not a broken lookup.
+  perform tests.ok(public.public_tracking('rheas-finds', null, n.rhea_number) is not null
+               and public.public_tracking('marlon-kicks', null, n.marlon_number) is not null,
+    'while each resolves perfectly well on its own');
+  perform tests.ok(public.public_tracking('rheas-finds', null, '999999') is null,
+    'an order number that does not exist returns nothing');
+  perform tests.ok(public.public_tracking('no-such-store', null, n.rhea_number) is null,
+    'and neither does a store that does not exist');
+end;
+$$;
+
+reset role;
+set local role authenticated;
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+
+-- ---------------------------------------------------------------------------
 -- my_tenants()
 -- ---------------------------------------------------------------------------
 \echo ''
@@ -2883,8 +3135,8 @@ declare v_passed int := coalesce(nullif(current_setting('tests.passed', true), '
 begin
   raise notice '';
   raise notice '=== % assertions passed', v_passed;
-  if v_passed < 340 then
-    raise exception 'Expected at least 340 assertions, only % ran — did a section get skipped?', v_passed
+  if v_passed < 380 then
+    raise exception 'Expected at least 380 assertions, only % ran — did a section get skipped?', v_passed
       using errcode = 'triggered_action_exception';
   end if;
 end;

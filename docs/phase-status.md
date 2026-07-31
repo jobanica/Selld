@@ -1077,3 +1077,107 @@ regression.
 **Gate:** `pnpm verify` (405 tests), `pnpm db:test` (355 assertions),
 `pnpm db:test:concurrency` (23 assertions). All 15 migrations apply from scratch on
 PG 17.6.
+
+---
+
+## Phase 11 — Tracking & buyer notifications
+
+**Done when:** the "nasaan na po order ko" message volume is structurally
+eliminated — the buyer gets the answer before they ask.
+
+That is a claim about a conversation that stops happening, so it was decomposed
+into the properties that would have to hold for it to be true, and each one
+measured over real HTTP against the real server and database:
+
+| | Result |
+|---|---|
+| A courier scan moves the order with nobody touching the dashboard | yes |
+| Texts sent for that scan | **1** |
+| Credits charged | **1** |
+| The text carries a link to the answer | yes |
+| The same scan replayed (courier retry, then poller) | 0 more texts, 0 more charges, 0 extra timeline rows |
+| A *different* scan meaning the same thing (`4` vs `400`) | recorded, **still 0 more texts** |
+| The link answers with no login, no cookie | 200, in the store's branding |
+| A late out-of-order scan | on the timeline, does not un-deliver, does not rewind the parcel |
+| A push for a waybill nobody booked | `unmatched`, nothing changes |
+| A wrong webhook secret | 404 |
+
+### What shipped
+
+- **`shipment_events`, one row per courier scan**, with
+  `unique (shipment_id, raw_code, occurred_at)`. Idempotency is a constraint, not a
+  check: a courier retrying a webhook is normal traffic, not an error case.
+- **A polling fallback over the same code path.** `shipments_to_poll()` returns only
+  parcels still moving that nobody has heard about recently. J&T's webhook setup is
+  per-merchant and frequently just not done, and a seller whose tracking is silent
+  has exactly the problem this phase exists to remove. The poller and the webhook
+  call the same function, because a fallback that behaves differently produces bugs
+  that only appear for the couriers nobody tests.
+- **The notification decision lives in SQL.** `record_shipment_event` returns
+  `notifyEvent` and the server sends whatever it is told. Deciding in the handler
+  would have put the rule in two places the moment the poller was written.
+- **Two layers of duplicate defence**, because they catch different things.
+  `shipment_events` collapses the same *scan*; `integration_logs (tenant,
+  order:event)` collapses the same *notification*, which is what stops two distinct
+  scan codes that both mean "out for delivery" from sending two texts.
+- **Per-tenant Taglish SMS templates**, seeded for every new tenant by
+  `seed_tenant_defaults` — a seller who has to write five templates before tracking
+  works is a seller whose tracking does not work. No default contains `₱`; the
+  tenancy suite asserts it.
+- **A credit ledger, not a counter.** Same reasoning as `stock_movements`: a balance
+  a seller cannot explain is a bill they will not trust. `sms_credit_move` holds a
+  per-tenant advisory lock and returns null rather than overdrawing.
+- **A public tracking page at `/track/{order_number}`**, server-rendered, no login,
+  readable with JavaScript disabled. The order number is the only credential, so the
+  page is deliberately thin: status, a four-step progress bar, the courier and
+  waybill, and the timeline. First name and destination city — enough to recognise
+  your own parcel, useless to anyone else.
+
+### The find that matters most
+
+**`sms_credit_balance` was readable by every signed-in user, for any store.**
+`SECURITY DEFINER` plus a grant to `authenticated` is not tenant scoping — the
+definer bypasses the RLS on the ledger, so passing another tenant's id returned
+their balance. Small as leaks go, and still one: it says how much a competitor
+spends on SMS and how close they are to running out.
+
+The fix is the phase-6 `apply_reservation` split — an unchecked
+`sms_credit_balance_raw` for the definer-owned functions that need a balance
+mid-send, and a membership check on the one that is granted out. The notification
+path *must* use the raw one: it runs as the definer with no JWT, so a membership
+check there would tell it every seller has no credits and silence every message.
+
+### Notable findings
+
+| Symptom | Cause |
+|---|---|
+| The balance flicked between two numbers, and the data-layer probe passed about half the time | `sms_credit_balance` ordered by `created_at desc, id desc`. `now()` is the *transaction* timestamp, so rows written in one transaction tie — and the tie broke on a random uuid. Ordering is a `bigint` identity column now. Sabotage: 2 of 6 runs fail with the old ordering, 6 of 6 pass with the new. |
+| Every tracking SMS pointed at the webhook's own hostname | The link was built from `url.origin` of the request that triggered it — which is a courier's webhook arriving on the platform host, not the seller's storefront. `sms_render_for_order` now builds `{scheme}://{slug}.{host}`, or the store's custom domain: the same rule `resolveSurface` applies in the other direction. |
+| `public_tracking` 404'd against a function that was right there | PostgREST resolves an overload by the *set of argument names* in the body. `p_domain` was added to the SQL and not to the call, and a key that is absent is a key PostgREST never sees. The error even names the signature you meant. |
+| `picked up` appeared mid-timeline, lowercase and unpunctuated | The page had one status map; the database has two vocabularies — `orders.fulfillment_status` and `shipment_status_map` — that overlap without being the same list. `tracking-page.test.tsx` now walks both. |
+
+### Deliberately deferred
+
+- **Nothing drives the poller on a timer.** `pollShipments()` is written, tested and
+  shares the webhook's code path, but the scheduler that calls it every few minutes —
+  along with phase 10's booking-retry curve — belongs with the job runner, not with a
+  request handler.
+- **Semaphore is not wired.** Sending still goes through the `log` provider, which
+  reports realistic per-segment costs so the ledger arithmetic is exercised. The
+  provider registry means this is one registration, not a change to this code.
+- **Credit top-ups have no UI.** The ledger takes `topup` rows and the balance is
+  visible; buying credits is a payments-shaped feature and belongs with billing.
+- **No seller-facing template editor.** The templates are per tenant and editable by
+  an admin through the API, with RLS asserted — the screen for it is UI work this
+  phase did not need to prove its done-when.
+
+### Still needed outside the repo
+
+- `COURIER_WEBHOOK_SECRET` must be set in the storefront server's environment, and
+  the resulting URL — `/api/webhooks/courier/{jnt|flash}/{secret}` — registered with
+  each courier. Neither J&T nor Flash signs its tracking pushes, so that path segment
+  *is* the credential. Unset, the endpoint answers 503 and tracking falls back to
+  polling.
+
+**Gate:** `pnpm verify`, `pnpm db:test` (394 assertions),
+`pnpm db:test:concurrency`. All 16 migrations apply from scratch on PG 17.6.

@@ -5,7 +5,8 @@ Build one phase per session, in order. The full roadmap is in
 [`docs/build-spec.md`](docs/build-spec.md); who we're building for is in
 [`docs/avatar.md`](docs/avatar.md).
 
-**Current state: phase 10 complete.** Next up is phase 11 (tracking & buyer notifications).
+**Current state: phase 11 complete.** Next up is phase 12 (COD reconciliation and
+RTS control).
 
 ---
 
@@ -18,6 +19,7 @@ pnpm dev:store        # storefront SSR server on :5174 — try rheas-finds.local
 pnpm verify           # typecheck + lint + test + build — run before every commit
 pnpm test:watch       # tests in watch mode
 pnpm start            # production storefront server (needs `pnpm build` first)
+                      # tracking webhooks need COURIER_WEBHOOK_SECRET set
 pnpm seed:demo        # demo store + generated product images, for storefront work
 pnpm lighthouse       # Lighthouse mobile against a running `pnpm start`
 
@@ -180,6 +182,21 @@ What follows from that:
 - **Autofill comes from the buyer's own cookie, never from a phone lookup.** A
   server-side "look up this phone and return the address" endpoint is an address
   disclosure oracle on a public form.
+
+- **Phase 11 adds a third boundary that is weaker still: the order number.** The
+  public tracking page has no cookie and no account, so `/track/{order_number}` is
+  a capability held by anyone the SMS is forwarded to. `public_tracking()` is
+  therefore built as a whitelist — status, timeline, courier, waybill, first name,
+  destination city — and nothing else. No street, no phone, no surname, no totals,
+  no line items. Both the tenancy suite and a CI step assert against a real order
+  that none of those appear in the payload.
+- **A `SECURITY DEFINER` function granted to `authenticated` is not tenant-scoped.**
+  The definer bypasses the RLS on the tables it reads, so the *function* has to
+  check. `sms_credit_balance(tenant_id)` shipped without that check and returned any
+  store's balance to any signed-in user. Where a definer-owned caller also needs the
+  value — the notification path runs with no JWT and would see "no credits" — split
+  it the way `apply_reservation` is split: an unchecked `_raw` primitive granted to
+  nobody, and a checked wrapper that is the only thing granted out.
 
 **`cart_pricing()` is the only place money is computed.** The quote the buyer sees
 and the order that gets written both go through it, so they cannot disagree.
@@ -390,6 +407,33 @@ one new file plus one registry line, and zero lines of order logic.
 - **`pnpm db:types` used to drop the file's hand-written header**, which CI's drift
   check strips with `tail -n +10`. Running it therefore broke the check it exists to
   satisfy. The script now re-emits the header.
+- **`now()` is the transaction timestamp, so `order by created_at` does not order
+  rows written together.** The SMS credit ledger broke a `created_at` tie on
+  `id desc` — a random uuid — so `sms_credit_balance` returned the pre-send balance
+  about half the time. A ledger needs a monotonic `bigint generated always as
+  identity`, not a timestamp. Sabotage the ordering and run the probe six times: the
+  symptom is flakiness, not failure, which is why it survived a green run.
+- **PostgREST resolves a function overload by the set of argument *names* in the
+  body.** A key that `JSON.stringify` drops (or that you simply forgot) is a key
+  PostgREST never sees, and the call 404s with `PGRST202` against a function that is
+  right there — the `hint` even names the signature you meant. Pass optional
+  arguments as explicit `null`, not `undefined`.
+- **A link in an outgoing message must be built from the *store's* origin, never the
+  request's.** A courier webhook arrives on the platform's own hostname, so
+  `url.origin` there is not the seller's shop. `sms_render_for_order` composes
+  `{scheme}://{slug}.{host}` (or the custom domain) itself — the same rule
+  `resolveSurface` applies to an inbound request.
+- **The database has two status vocabularies, and the UI must speak both.**
+  `orders.fulfillment_status` (pending…rts) and `shipment_events.status` (the
+  courier codes in `shipment_status_map`) overlap without being the same list. A
+  value missing from the UI's map renders as a raw code on a buyer's phone with no
+  warning; `src/storefront/pages/tracking-page.test.tsx` walks both lists. Note that
+  i18next falls back `tl` → `en`, so a missing Taglish string is caught by the type
+  on `tl.ts`, not by a rendering test.
+- **`Host` is a forbidden header for `fetch`, and Node does not resolve
+  `*.localhost`.** Both silently send a test to the wrong surface — a request meant
+  for a store arrives as `127.0.0.1` and renders the dashboard shell. Drive
+  multi-tenant HTTP checks through `curl -H 'Host: …'`.
 - **`pnpm db:test` does not apply migrations.** It runs the SQL suites against
   whatever is already in the database, so editing a migration and re-running the
   tests proves nothing about the edit. Sabotage a function with

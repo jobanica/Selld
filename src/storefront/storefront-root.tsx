@@ -9,6 +9,7 @@ import { HomePage } from './pages/home-page'
 import { OrderConfirmedPage } from './pages/order-confirmed-page'
 import { ProductPage } from './pages/product-page'
 import { StoreNotFound } from './pages/store-not-found'
+import { TrackingPage } from './pages/tracking-page'
 import type { PageData } from './storefront-data'
 import { StorefrontProvider } from './storefront-provider'
 
@@ -66,6 +67,8 @@ export function StorefrontRoot({
       <CheckoutPage data={data} />
     ) : data.route === 'order-confirmed' ? (
       <OrderConfirmedPage receipt={data.receipt} />
+    ) : data.route === 'track' ? (
+      <TrackingPage data={data.tracking} />
     ) : (
       <StoreNotFound hostname={data.route === 'not-found' ? data.hostname : origin} />
     )
@@ -94,6 +97,5 @@ export function StorefrontRoot({
 function storeOf(data: StorefrontPage) {
   if (data.route === 'not-found') return data.store
   if (data.route === 'home' || data.route === 'product') return data.payload.store
-  if (data.route === 'cart' || data.route === 'checkout') return data.store ?? null
   return data.store ?? null
 }

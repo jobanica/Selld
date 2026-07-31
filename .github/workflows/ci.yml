@@ -285,7 +285,9 @@ jobs:
                 'orders_bulk_transition', 'orders_list', 'order_detail',
                 'orders_packing_batch', 'create_manual_order', 'add_order_note',
                 'set_courier_credentials', 'courier_credentials',
-                'record_shipment', 'record_booking_failure'
+                'record_shipment', 'record_booking_failure',
+                'record_shipment_event', 'record_tracking_sms', 'sms_credit_move',
+                'sms_render_for_order', 'shipments_to_poll', 'sms_credit_balance_raw'
               ]
               loop
                 if exists (
@@ -334,7 +336,9 @@ jobs:
                 'payment_account_for_webhook', 'payment_credentials_for_payment',
                 'sync_order_payment_status', 'log_integration_attempt',
                 'set_courier_credentials', 'courier_credentials',
-                'record_shipment', 'record_booking_failure'
+                'record_shipment', 'record_booking_failure',
+                'record_shipment_event', 'record_tracking_sms', 'sms_credit_move',
+                'sms_render_for_order', 'shipments_to_poll'
               ]
               loop
                 if exists (
@@ -352,6 +356,55 @@ jobs:
                   array_to_string(blocked, ', ');
               end if;
               raise notice 'service role can execute what it needs OK';
+            end
+            \$\$;
+          "
+
+      # The tracking page has no authentication at all, so the only thing standing
+      # between an order number and a buyer's personal data is what
+      # `public_tracking()` chooses to return. Asserted against a real order rather
+      # than by reading the source: a `select *` slipped into the payload would
+      # publish a name, phone and street to anyone holding a four-digit number.
+      - name: The public tracking payload carries nothing personal
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h 127.0.0.1 -p 54322 -U postgres -v ON_ERROR_STOP=1 -c "
+            do \$\$
+            declare
+              v_tenant uuid;
+              v_track  jsonb;
+              v_leaks  text[] := '{}';
+              k        text;
+            begin
+              if not has_function_privilege('anon', 'public.public_tracking(text,text,text)', 'EXECUTE') then
+                raise exception 'anon cannot reach the tracking page at all — the whole phase is dead';
+              end if;
+
+              insert into public.tenants (name, slug, status)
+              values ('CI Track', 'ci-track', 'active') returning id into v_tenant;
+              insert into public.orders
+                (tenant_id, order_number, contact_name, contact_phone, shipping_address,
+                 subtotal_centavos, grand_total_centavos, payment_method)
+              values (v_tenant, '0001', 'Jasmine Villanueva', '+639171234599',
+                      '{\"cityName\":\"Davao City\",\"street\":\"21 Rizal Street\"}'::jsonb,
+                      50000, 50000, 'cod');
+
+              v_track := public.public_tracking('ci-track', null, '0001');
+              if v_track is null then raise exception 'the tracking page found nothing'; end if;
+
+              -- Anything that could identify or locate the buyer.
+              foreach k in array array['21 Rizal Street', '+639171234599', 'Villanueva'] loop
+                if v_track::text like '%' || k || '%' then v_leaks := v_leaks || k; end if;
+              end loop;
+
+              if array_length(v_leaks, 1) > 0 then
+                raise exception 'public_tracking() leaks: %', array_to_string(v_leaks, ', ');
+              end if;
+              raise notice 'public tracking payload is safe to hand a stranger OK';
+              raise exception 'rollback';
+            exception when others then
+              if sqlerrm <> 'rollback' then raise; end if;
             end
             \$\$;
           "

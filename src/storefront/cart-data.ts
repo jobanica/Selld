@@ -169,6 +169,44 @@ export function isOnlineMethod(value: string): value is OnlineMethod {
   return (ONLINE_METHODS as readonly string[]).includes(value)
 }
 
+/**
+ * One scan on a parcel's timeline.
+ *
+ * `status` is Selld's normalised vocabulary, not the courier's — the raw code is
+ * kept in the database for support, but a buyer should never be shown "MP_S060".
+ * `description` and `location` are the courier's own words and may be absent.
+ */
+export interface TrackingEventView {
+  status: string
+  description: string | null
+  location: string | null
+  occurredAt: string
+}
+
+/**
+ * What `public_tracking()` returns — and, just as importantly, what it does not.
+ *
+ * This payload is reachable by anyone holding a store slug and an order number, so
+ * it is built from the short list of things a buyer needs to recognise their own
+ * parcel and nothing else. No street, no phone, no surname, no line items, no
+ * money. See the function itself for the reasoning; this type is the client-side
+ * half of the same promise.
+ */
+export interface TrackingPayload {
+  orderNumber: string
+  placedAt: string
+  status: string
+  paymentStatus: string
+  /** First name only. Enough to confirm "yes, this is mine". */
+  firstName: string
+  /** Destination city, never the street. */
+  city: string | null
+  store: { name: string; slug: string }
+  courier: string | null
+  waybill: string | null
+  events: TrackingEventView[]
+}
+
 export type CartPageData =
   | { route: 'cart'; store: Store | null; quote: CartQuote | null }
   | {
@@ -184,6 +222,13 @@ export type CartPageData =
       onlineMethods: OnlineMethod[]
     }
   | { route: 'order-confirmed'; store: Store | null; receipt: OrderReceipt }
+  /**
+   * `tracking` is null for an order number that does not exist in this store.
+   * The page still renders in the store's own branding rather than the generic
+   * 404, because the likeliest cause is a mistyped number and the buyer needs to
+   * be told that in a place that still looks like the shop they bought from.
+   */
+  | { route: 'track'; store: Store | null; tracking: TrackingPayload | null }
 
 export interface PsgcUnit {
   code: string

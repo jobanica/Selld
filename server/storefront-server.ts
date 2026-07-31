@@ -12,6 +12,7 @@ import {
   isOnlineMethod,
   type CartPageData,
   type OnlineMethod,
+  type TrackingPayload,
 } from '../src/storefront/cart-data'
 import type { StorefrontPage } from '../src/storefront/storefront-root'
 import type { HomePayload, PageData, ProductPayload } from '../src/storefront/storefront-data'
@@ -30,6 +31,7 @@ import {
 import { CART_COOKIE } from './cookies'
 import { serveCourierRoutes } from './courier-routes'
 import { serveXenditWebhook } from './payment-webhook'
+import { serveCourierWebhook } from './tracking'
 import { readSupabaseConfig, rpc, type SupabaseConfig } from './supabase-rpc'
 
 /**
@@ -289,6 +291,10 @@ async function handle(
   // is answered before surface routing for the same reason webhooks are.
   if (await serveCourierRoutes(request, response, url.pathname, context.supabase)) return
 
+  // Courier tracking pushes. Answered before surface routing for the same reason
+  // as the payment webhook: a courier posts to whatever host was configured.
+  if (await serveCourierWebhook(request, response, url.pathname, storeRootUrl(url))) return
+
   // `.localhost` subdomains resolve to 127.0.0.1 in every modern browser, so
   // `rheas-finds.localhost:5174` exercises the real subdomain path in dev.
   const surface = resolveSurface(hostname, {
@@ -383,6 +389,30 @@ async function handle(
       },
       error: null,
     })
+  }
+
+  // ---- Public order tracking --------------------------------------------
+  // No cookie, no login, no account. A buyer opens this from an SMS while
+  // standing outside, on whatever phone they have, and it has to work.
+  //
+  // Scoped to the store the hostname resolves to, so an order number is only ever
+  // meaningful on its own seller's storefront — two sellers both have an order
+  // `0001` and neither can read the other's.
+  const trackMatch = /^\/track\/([A-Za-z0-9][A-Za-z0-9._-]{0,39})\/?$/.exec(url.pathname)
+  if (trackMatch !== null) {
+    const [branding, tracking] = await Promise.all([
+      fetchStoreBranding(context.supabase, store),
+      fetchTracking(context.supabase, store, trackMatch[1] ?? ''),
+    ])
+    // No store at this hostname: fall through to the generic not-found below
+    // rather than rendering a tracking page with no branding to render it in.
+    if (branding !== null) {
+      return renderPage(request, response, context, url, {
+        route: 'track',
+        store: branding,
+        tracking,
+      })
+    }
   }
 
   if (url.pathname === '/order/confirmed') {
@@ -518,6 +548,58 @@ async function fetchOnlineMethods(
   } catch {
     return []
   }
+}
+
+/**
+ * One order's public tracking state, or null.
+ *
+ * Failure degrades to null rather than to a 500. The buyer arrived here because a
+ * text told them to; a stack trace teaches them that the link is broken and sends
+ * them straight back to messaging the seller, which is the exact behaviour this
+ * phase exists to remove.
+ */
+async function fetchTracking(
+  supabase: SupabaseConfig,
+  store: StoreRef,
+  orderNumber: string,
+): Promise<TrackingPayload | null> {
+  try {
+    return await rpc<TrackingPayload | null>(supabase, 'public_tracking', {
+      p_slug: store.slug,
+      // Explicitly null rather than omitted. PostgREST resolves an overload by
+      // the *set of argument names* in the body, and a key JSON.stringify drops
+      // is a key PostgREST never sees — the call then 404s against a function
+      // that is right there, with a hint naming the signature you meant.
+      p_domain: store.domain,
+      p_order_number: orderNumber,
+    })
+  } catch {
+    return null
+  }
+}
+
+/**
+ * The platform's own origin, for building links into a *seller's* storefront.
+ *
+ * Deliberately not `url.origin`. A courier webhook arrives on the platform's
+ * webhook hostname, and a tracking link built from that request would point a
+ * buyer at the webhook endpoint rather than at the shop they bought from — in
+ * dev that showed up as `http://127.0.0.1:5184/track/0001` in an outgoing SMS.
+ * `sms_render_for_order` turns this into `{scheme}://{slug}.{host}` (or the
+ * store's custom domain), which is the same rule `resolveSurface` applies in
+ * the other direction.
+ */
+function storeRootUrl(url: URL): string {
+  // Loopback counts as local too. A courier webhook replayed against a dev
+  // server arrives on `127.0.0.1`, and resolving that to the production root
+  // domain would put an unreachable link in every test message.
+  const local =
+    url.hostname.endsWith('.localhost') ||
+    url.hostname === 'localhost' ||
+    url.hostname === '127.0.0.1' ||
+    url.hostname === '[::1]'
+  const host = local ? `localhost${url.port === '' ? '' : `:${url.port}`}` : ROOT_DOMAIN
+  return `${url.protocol}//${host}`
 }
 
 function cartTokenFrom(request: IncomingMessage): string | null {
