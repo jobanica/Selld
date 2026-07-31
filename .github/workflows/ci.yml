@@ -268,7 +268,7 @@ jobs:
       # This asserts the ACL directly rather than by attempting a call, so it fails
       # for a *new* money-moving function someone forgets to lock down, not only for
       # the six that exist today.
-      - name: Money-moving functions are not executable by PUBLIC
+      - name: Money- and order-moving functions are not executable by PUBLIC
         env:
           PGPASSWORD: postgres
         run: |
@@ -281,7 +281,9 @@ jobs:
               foreach t in array array[
                 'record_payment_event', 'attach_payment_charge',
                 'payment_account_for_webhook', 'payment_credentials_for_payment',
-                'sync_order_payment_status', 'log_integration_attempt'
+                'sync_order_payment_status', 'log_integration_attempt',
+                'orders_bulk_transition', 'orders_list', 'order_detail',
+                'orders_packing_batch', 'create_manual_order', 'add_order_note'
               ]
               loop
                 if exists (
@@ -290,7 +292,6 @@ jobs:
                     and (
                       p.proacl is null                                  -- default = PUBLIC
                       or has_function_privilege('anon', p.oid, 'EXECUTE')
-                      or has_function_privilege('authenticated', p.oid, 'EXECUTE')
                     )
                 ) then
                   leaked := leaked || t;
@@ -299,7 +300,7 @@ jobs:
 
               if array_length(leaked, 1) > 0 then
                 raise exception
-                  'These are callable by a client role and must not be: %. Use: revoke all on function ... from public;',
+                  'These are callable by anon and must not be: %. Use: revoke all on function ... from public;',
                   array_to_string(leaked, ', ');
               end if;
               raise notice 'money-moving functions are service-role only OK';

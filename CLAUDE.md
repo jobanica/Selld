@@ -5,7 +5,7 @@ Build one phase per session, in order. The full roadmap is in
 [`docs/build-spec.md`](docs/build-spec.md); who we're building for is in
 [`docs/avatar.md`](docs/avatar.md).
 
-**Current state: phase 8 complete.** Next up is phase 9 (order management dashboard).
+**Current state: phase 9 complete.** Next up is phase 10 (courier integration).
 
 ---
 
@@ -348,6 +348,21 @@ one new file plus one registry line, and zero lines of order logic.
   with the specificity tiebreak deleted. It now numbers them backwards on purpose.
   Same lesson as the phase-6 hard-rule-6 assertion: after writing a test, break the
   thing it guards and watch it fail.
+- **`packer` ranks *below* `staff`.** The hierarchy is owner > admin > staff >
+  packer > rider, so `has_tenant_role(t, 'staff')` **excludes** a packer. Guarding
+  order fulfilment with `'staff'` locked the packer role out of packing — the one
+  screen it exists for. Fulfilment moves are `packer`; cancelling (a refund
+  decision) is `staff`.
+- **A PH phone must be normalised on *both* sides before searching.** Numbers are
+  stored `+639171234567`; a seller types `09171234567`, and neither digit string
+  contains the other. Order search found nothing for the single most likely query
+  anyone would make. `ph_national_digits()` reduces both to `9171234567`. It also
+  needs a length floor — at four digits it matched order number `0001` against the
+  `00010`…`00019` inside other buyers' numbers.
+- **Don't bleed a page element to the screen edge with `-mx-4`.** The dashboard
+  shell is `px-3 sm:px-6 lg:px-8`, so a hard-coded `-mx-4` overhangs by 4px at
+  390px and puts a horizontal scrollbar on the page. Scroll inside the column
+  instead.
 - **`revoke ... from anon, authenticated` does not lock down a function.** Postgres
   grants `EXECUTE` on every new function to **PUBLIC**, and revoking from a specific
   role does not remove a privilege that role holds *through* PUBLIC. The revoke

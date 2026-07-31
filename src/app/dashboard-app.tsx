@@ -9,6 +9,7 @@ import { RequireAuth } from '@/features/auth/require-auth'
 import { SessionProvider } from '@/features/auth/session-provider'
 import { ProductListPage } from '@/features/catalog/product-list-page'
 import { InventoryPage } from '@/features/inventory/inventory-page'
+import { OrdersPage } from '@/features/orders/orders-page'
 import { PaymentsPage } from '@/features/payments/payments-page'
 import { ShippingPage } from '@/features/shipping/shipping-page'
 import { AcceptInvitationPage } from '@/features/tenancy/accept-invitation-page'
@@ -25,7 +26,7 @@ import { TenantProvider } from '@/features/tenancy/tenant-provider'
 export default function DashboardApp() {
   // Routes that have a real implementation. Everything else in the nav still
   // renders a placeholder rather than 404ing.
-  const implemented = new Set(['/', '/products', '/inventory', '/shipping', '/payments'])
+  const implemented = new Set(['/', '/orders', '/products', '/inventory', '/shipping', '/payments'])
   const pending = ALL_NAV_ITEMS.filter((item) => !implemented.has(item.to))
 
   return (
@@ -48,6 +49,7 @@ export default function DashboardApp() {
             <Route path="/inventory" element={<InventoryPage />} />
             <Route path="/shipping" element={<ShippingPage />} />
             <Route path="/payments" element={<PaymentsPage />} />
+            <Route path="/orders" element={<OrdersPage />} />
             {pending.map((item) => (
               <Route key={item.to} path={item.to} element={<ComingSoon />} />
             ))}

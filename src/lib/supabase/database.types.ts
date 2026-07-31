@@ -795,6 +795,62 @@ export type Database = {
           },
         ]
       }
+      order_notes: {
+        Row: {
+          author_id: string | null
+          body: string
+          created_at: string
+          id: string
+          order_id: string
+          tenant_id: string
+        }
+        Insert: {
+          author_id?: string | null
+          body: string
+          created_at?: string
+          id?: string
+          order_id: string
+          tenant_id: string
+        }
+        Update: {
+          author_id?: string | null
+          body?: string
+          created_at?: string
+          id?: string
+          order_id?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "order_notes_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "order_notes_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "order_notes_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "order_notes_tenant_id_order_id_fkey"
+            columns: ["tenant_id", "order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
       order_status_history: {
         Row: {
           actor_id: string | null
@@ -859,6 +915,21 @@ export type Database = {
             referencedColumns: ["tenant_id", "id"]
           },
         ]
+      }
+      order_transitions: {
+        Row: {
+          from_status: string
+          to_status: string
+        }
+        Insert: {
+          from_status: string
+          to_status: string
+        }
+        Update: {
+          from_status?: string
+          to_status?: string
+        }
+        Relationships: []
       }
       orders: {
         Row: {
@@ -2836,6 +2907,10 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      add_order_note: {
+        Args: { p_body: string; p_order_id: string }
+        Returns: Json
+      }
       apply_reservation: {
         Args: { p_items: Json; p_location_id: string; p_tenant_id: string }
         Returns: undefined
@@ -2913,6 +2988,18 @@ export type Database = {
         }
         Returns: Json
       }
+      create_manual_order: {
+        Args: {
+          p_address: Json
+          p_contact_name: string
+          p_contact_phone: string
+          p_items: Json
+          p_notes?: string
+          p_payment_method?: string
+          p_tenant_id: string
+        }
+        Returns: Json
+      }
       create_tenant: {
         Args: { p_name: string; p_slug: string }
         Returns: {
@@ -2980,8 +3067,34 @@ export type Database = {
         Args: { p_amount: number; p_payment_id: string; p_reason: string }
         Returns: Json
       }
+      order_detail: { Args: { p_order_id: string }; Returns: Json }
       order_receipt: { Args: { p_order_id: string }; Returns: Json }
       order_receipt_for_token: { Args: { p_token: string }; Returns: Json }
+      orders_bulk_transition: {
+        Args: {
+          p_note?: string
+          p_order_ids: string[]
+          p_tenant_id: string
+          p_to_status: string
+        }
+        Returns: Json
+      }
+      orders_list: {
+        Args: {
+          p_before_id?: string
+          p_before_placed_at?: string
+          p_limit?: number
+          p_search?: string
+          p_tenant_id: string
+          p_view?: string
+        }
+        Returns: Json
+      }
+      orders_packing_batch: {
+        Args: { p_order_ids: string[]; p_tenant_id: string }
+        Returns: Json
+      }
+      orders_view_counts: { Args: { p_tenant_id: string }; Returns: Json }
       payment_account_for_webhook: {
         Args: { p_slug: string }
         Returns: {
@@ -3008,6 +3121,7 @@ export type Database = {
         Args: { p_order_id: string; p_token: string }
         Returns: Json
       }
+      ph_national_digits: { Args: { p_input: string }; Returns: string }
       quote_shipping: {
         Args: {
           p_city_code: string

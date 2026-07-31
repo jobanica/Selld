@@ -14,8 +14,8 @@ phase's scope and done-when criteria.
 | 6 | Cart & guest checkout | ✅ Complete |
 | 7 | Shipping configuration | ✅ Complete |
 | 8 | Payments | ✅ Complete |
-| 9 | Order management dashboard | ⬜ Next |
-| 10 | Courier integration | ⬜ |
+| 9 | Order management dashboard | ✅ Complete |
+| 10 | Courier integration | ⬜ Next |
 | 11 | Tracking & buyer notifications | ⬜ |
 | 12 | COD reconciliation & RTS control | ⬜ |
 | 13 | Live selling capture | ⬜ |
@@ -884,4 +884,98 @@ which hard rule 6 already forbids on the way out. Asserted in both suites.
 
 **Gate:** `pnpm verify` (374 tests), `pnpm db:test` (302 assertions),
 `pnpm db:test:concurrency` (23 assertions). All 13 migrations apply from scratch on
+PG 17.6.
+
+---
+
+## Phase 9 — Order management
+
+**Done when:** 50 orders can be moved from `confirmed` to `packed` in under 60
+seconds.
+
+**Measured** in Chromium at 390×844 @2×, against a real database, from landing on
+the orders screen to all fifty being packed:
+
+| | Result | Budget |
+|---|---:|---:|
+| 50 orders confirmed → packed | **1.2 s** | 60 s |
+| Taps | **2** (select all, mark packed) | — |
+| Horizontal overflow at 390px | 0 px | 0 |
+| Console errors | none | none |
+
+Verified in the database afterwards: 50 packed, and 50 `order_status_history` rows
+written by the same statement that moved them.
+
+What buys the 60 seconds is not rendering. It is that the whole batch is **one
+call** — `orders_bulk_transition` does an `UPDATE ... WHERE id = any(...)` and an
+`INSERT ... SELECT` for the timeline. Fifty single-row RPCs would be fifty round
+trips (7.5 s of pure latency at a provincial 150 ms RTT) and fifty separate
+transactions, so a dropped connection halfway would leave a seller unable to tell
+which half moved.
+
+### What shipped
+
+- **Six saved views** — Needs confirmation / To pack / To ship / In transit / RTS /
+  Today's COD — as tabs with live counts, plus All. Named rather than assembled from
+  filters, because they are the questions a seller actually asks.
+- **`orders_list`**, one jsonb document per page, with keyset pagination on
+  `(placed_at, id)`. Not OFFSET: an order list is append-heavy at the top, and
+  OFFSET silently repeats or skips rows as new orders arrive mid-scroll.
+- **One search box** over order number, name and phone.
+- **Bulk actions** with the offered set **intersected** across the selection, so a
+  mixed selection only offers what every row can do.
+- **`order_transitions`** as a table, read by both the database and the UI, so the
+  pipeline has one definition. `transitions.test.ts` pins the client copy against
+  the SQL fixture.
+- **Order detail** in one round trip: items, customer, address, timeline, payment,
+  internal notes, and the allowed transitions for *this* order.
+- **`order_notes`** — staff notes, deliberately separate from `orders.notes` (the
+  buyer's own message) and append-only: there is no UPDATE grant at all.
+- **Manual order creation** for DM orders, priced by building a real cart and calling
+  the same `cart_pricing` and `checkout_place_order` the storefront uses. A second
+  pricing path would be a second place for the shipping resolver, the COD fee and
+  hard rule 6 to disagree.
+- **Packing slips and a picking list**, printed by the browser. "Save as PDF" in the
+  print dialog is the PDF the spec asks for, and it works on the phone a seller
+  actually holds — a server-side pipeline would add headless Chrome and a render
+  queue to arrive at the same file. The picking list is one row per SKU across the
+  whole batch, which is the thing that saves the time: walk the shelves once.
+- **The phase-8 payment actions**, which were deferred for want of this screen:
+  record a manual payment, remit COD, issue a refund.
+
+### Notable findings
+
+| Symptom | Cause |
+|---|---|
+| A packer could not mark an order packed | `packer` ranks *below* `staff`, so `has_tenant_role(t, 'staff')` excludes it — and packing is the entire job of the role literally called packer. Fulfilment moves are now `packer`; cancelling, which carries a refund decision, stays `staff`. |
+| Searching a customer's phone found nothing | Phones are stored `+639171234567`; a seller types `09171234567`, and neither digit string contains the other. The single most likely search anyone would run returned zero rows. Both sides now go through `ph_national_digits()`. |
+| Searching order `0001` returned eleven orders | The phone branch had a four-digit floor, so an order number matched the `00010`…`00019` inside other buyers' numbers. Floor raised to seven. |
+| A 4px horizontal scrollbar at 390px, on `/orders` only | A `-mx-4` "bleed to the screen edge" that assumed 16px shell padding; the shell is `px-3 sm:px-6 lg:px-8`. Removed rather than re-guessed. |
+
+### Two things the sabotage runs showed
+
+Removing the tenant scope from the bulk UPDATE does not merely fail an assertion —
+it violates `order_status_history_tenant_id_order_id_fkey` and aborts. The composite
+FK makes a cross-tenant timeline row *unrepresentable*, so a cross-tenant bulk move
+cannot be written even if the WHERE clause is wrong. That is the phase-4 lesson
+paying off in a phase written five sessions later.
+
+Switching `today_cod` from a Manila day to a UTC day drops an order placed at 07:00
+Manila (23:00 UTC yesterday) — 49 instead of 50. A seller doing an 8am COD cutoff
+would be missing two hours of the day's orders with nothing to indicate it. Now
+asserted, not just reported.
+
+### Deliberately deferred
+
+- **The manual-order UI.** `create_manual_order` is complete, tested and reachable
+  from the API module; the form that drives it needs a product picker, which is a
+  screen of its own. The RPC is what phase 13's live-selling capture will call.
+- **Waybill search.** The spec lists it; there are no waybills until phase 10
+  creates `shipments`. `order_detail` already returns an empty `shipments` array so
+  the screen has a shape to grow into.
+- **Saved views are fixed, not user-defined.** The six named ones cover the workflow;
+  custom views are a settings surface with no demand behind it yet.
+
+**Gate:** `pnpm verify` (383 tests), `pnpm db:test` (334 assertions),
+`pnpm db:test:concurrency` (23 assertions). All 14 migrations apply from scratch on
 PG 17.6.

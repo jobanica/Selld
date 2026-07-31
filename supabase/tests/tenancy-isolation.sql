@@ -2415,6 +2415,266 @@ set local role authenticated;
 select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
 
 -- ---------------------------------------------------------------------------
+-- Phase 9: the order dashboard
+-- ---------------------------------------------------------------------------
+-- The bulk transition is the piece that needs the most care. It takes an *array of
+-- ids* and a tenant, and moves them in one statement — so if the tenant scope on
+-- that UPDATE were ever dropped, a caller could move any order in the system by
+-- guessing an id. The assertions below aim straight at that.
+\echo ''
+\echo '=== Phase 9: orders dashboard'
+
+reset role;
+do $$
+declare
+  i record;
+  v_rhea_order   uuid;
+  v_marlon_order uuid;
+begin
+  select * into i from tests.ids;
+
+  -- Marlon needs an order of his own to prove isolation in both directions.
+  insert into public.orders
+    (tenant_id, order_number, shipping_address, contact_name, contact_phone,
+     subtotal_centavos, shipping_total_centavos, grand_total_centavos,
+     payment_method, fulfillment_status)
+  values (i.marlon_tenant, 'M-0001', '{"cityName":"Cebu City"}'::jsonb,
+          'Marlon Buyer', '+639181234567', 50000, 10000, 60000, 'cod', 'confirmed')
+  returning id into v_marlon_order;
+
+  select id into v_rhea_order from public.orders where tenant_id = i.rhea_tenant limit 1;
+  update public.orders set fulfillment_status = 'confirmed' where id = v_rhea_order;
+
+  create table tests.p9 as select v_rhea_order as rhea_order, v_marlon_order as marlon_order;
+  grant select on tests.p9 to authenticated, anon;
+
+  perform tests.pass('phase 9 fixture: one confirmed order in each tenant');
+end;
+$$;
+
+set local role authenticated;
+select tests.login('22222222-2222-2222-2222-222222222222', 'marlon@example.ph');
+do $$
+declare
+  i record;
+  p record;
+  v_res jsonb;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p9;
+
+  -- ---- The bulk transition is tenant-scoped -------------------------------
+  -- Passing his own tenant with *her* order id must move nothing. This is the
+  -- assertion that matters most in the phase: the function is authorised once
+  -- against the tenant, and the `where tenant_id = p_tenant_id` on the UPDATE is
+  -- what makes that safe.
+  v_res := public.orders_bulk_transition(i.marlon_tenant, array[p.rhea_order], 'packed');
+  perform tests.eq((v_res ->> 'moved')::int, 0,
+    'Marlon cannot move Rhea''s order by passing his own tenant id');
+  perform tests.eq((v_res ->> 'skipped')::int, 1,
+    'and it is reported as skipped rather than silently dropped');
+
+  -- Passing *her* tenant is refused outright, because he is not a member.
+  perform tests.rejects(
+    format($q$ select public.orders_bulk_transition(%L, array[%L]::uuid[], 'packed') $q$,
+      i.rhea_tenant, p.rhea_order),
+    'nor by passing her tenant id, which he is not a member of');
+
+  -- A mixed array moves only his own.
+  v_res := public.orders_bulk_transition(
+    i.marlon_tenant, array[p.rhea_order, p.marlon_order], 'packed');
+  perform tests.eq((v_res ->> 'moved')::int, 1,
+    'a mixed batch moves only the orders the caller''s tenant owns');
+  -- Whether *her* order actually moved is asserted from her own session below: RLS
+  -- correctly hides it from him, so reading it here returns null either way and
+  -- would pass against a broken tenant scope.
+
+  -- ---- Reads ---------------------------------------------------------------
+  perform tests.ok(public.orders_list(i.rhea_tenant) is null,
+    'orders_list returns nothing for a tenant the caller is not a member of');
+  perform tests.ok(public.order_detail(p.rhea_order) is null,
+    'order_detail returns nothing for another tenant''s order');
+  perform tests.ok(public.orders_packing_batch(i.rhea_tenant, array[p.rhea_order]) is null,
+    'nor can her orders be printed');
+  -- Zero, not null: the membership test is inside the WHERE, so a non-member gets
+  -- an all-zeros document. That leaks nothing — "no orders" and "not yours" look
+  -- identical from outside, which is the point.
+  perform tests.eq((public.orders_view_counts(i.rhea_tenant) ->> 'all'), '0',
+    'her order counts read as zero to a non-member, never her real numbers');
+
+  -- His own list works, and contains only his.
+  perform tests.eq(
+    jsonb_array_length(public.orders_list(i.marlon_tenant, 'all') -> 'orders'), 1,
+    'but his own list works and holds only his order');
+
+  -- ---- Notes ---------------------------------------------------------------
+  perform tests.rejects(
+    format($q$ select public.add_order_note(%L, 'prying') $q$, p.rhea_order),
+    'and he cannot annotate her order');
+end;
+$$;
+
+-- ---- Notes are append-only, and internal --------------------------------
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+do $$
+declare p record;
+begin
+  select * into p from tests.p9;
+
+  -- The other half of the cross-tenant bulk assertion, read as the only person who
+  -- can see the row.
+  perform tests.eq(
+    (select fulfillment_status from public.orders where id = p.rhea_order), 'confirmed',
+    'and Rhea''s order really was untouched by Marlon''s batch');
+
+  perform public.add_order_note(p.rhea_order, 'Customer disputes every RTS');
+  perform tests.eq((select count(*)::int from public.order_notes), 1,
+    'a member adds an internal note');
+
+  -- The author comes from the session, not from the request. A note whose author
+  -- the client can choose is not a record of anything.
+  perform tests.eq(
+    (select author_id from public.order_notes limit 1),
+    '11111111-1111-1111-1111-111111111111'::uuid,
+    'and the author is taken from the session');
+
+  -- Append-only. Asserted with `rejects`, not `affected`: there is no UPDATE
+  -- *grant* on the table at all, so this raises 42501 rather than being an
+  -- RLS-denied zero-row update. Same distinction that bit phase 6 on `orders`.
+  -- A timeline you can rewrite is not evidence.
+  perform tests.rejects($q$ update public.order_notes set body = 'rewritten' $q$,
+    'a note cannot be edited after the fact — there is no update grant');
+
+  -- A packer cannot forge someone else's authorship: the INSERT policy pins
+  -- author_id to auth.uid().
+  perform tests.rejects(
+    format($q$ insert into public.order_notes (tenant_id, order_id, author_id, body)
+               select tenant_id, %L, %L, 'not me' from public.orders where id = %L $q$,
+      p.rhea_order, '22222222-2222-2222-2222-222222222222'::uuid, p.rhea_order),
+    'nor can a note be attributed to someone else');
+end;
+$$;
+
+-- ---- Role enforcement ------------------------------------------------------
+select tests.login('33333333-3333-3333-3333-333333333333', 'jess@example.ph');
+do $$
+declare
+  i record;
+  p record;
+  v_res jsonb;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p9;
+
+  -- A packer packs. That is the job, and this screen exists for it.
+  --
+  -- `packer` ranks *below* `staff` in the hierarchy, so the first version of
+  -- `orders_bulk_transition` — which required `staff` — locked the packer role out
+  -- of packing entirely. Found here, fixed there.
+  v_res := public.orders_bulk_transition(i.rhea_tenant, array[p.rhea_order], 'packed');
+  perform tests.eq((v_res ->> 'moved')::int, 1, 'a packer can move orders to packed');
+  perform tests.eq(
+    (select count(*)::int from public.order_status_history
+      where order_id = p.rhea_order and to_status = 'packed'), 1,
+    'and the timeline records it, written by the same statement');
+
+  perform tests.eq(
+    (select actor_id from public.order_status_history
+      where order_id = p.rhea_order and to_status = 'packed'),
+    '33333333-3333-3333-3333-333333333333'::uuid,
+    'attributed to whoever actually did it');
+
+  perform tests.ok(public.orders_list(i.rhea_tenant) is not null,
+    'a packer reads the order list');
+
+  -- But cancelling is a commercial decision with a refund attached, not a
+  -- warehouse one.
+  perform tests.rejects(
+    format($q$ select public.orders_bulk_transition(%L, array[%L]::uuid[], 'cancelled') $q$,
+      i.rhea_tenant, p.rhea_order),
+    'but a packer cannot cancel an order');
+
+  -- Nor take a new order over DM: that is pricing and stock, not packing.
+  perform tests.rejects(
+    format($q$ select public.create_manual_order(%L, 'Walk-in', '+639171234567',
+             '{}'::jsonb, '[]'::jsonb) $q$, i.rhea_tenant),
+    'nor create one by hand');
+end;
+$$;
+
+-- ---- The pipeline is enforced, not advisory --------------------------------
+do $$
+declare
+  i record;
+  p record;
+  v_res jsonb;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p9;
+
+  -- packed -> delivered is not in `order_transitions`. Skipped, not moved.
+  v_res := public.orders_bulk_transition(i.rhea_tenant, array[p.rhea_order], 'delivered');
+  perform tests.eq((v_res ->> 'moved')::int, 0,
+    'an illegal transition moves nothing');
+  perform tests.eq((select fulfillment_status from public.orders where id = p.rhea_order),
+    'packed', 'and leaves the order where it was');
+
+  -- A status that is not in the pipeline at all raises, because it is a bug in the
+  -- caller rather than a stale screen.
+  perform tests.rejects(
+    format($q$ select public.orders_bulk_transition(%L, array[%L]::uuid[], 'teleported') $q$,
+      i.rhea_tenant, p.rhea_order),
+    'an unknown status is rejected outright');
+
+  -- The batch cap.
+  perform tests.rejects(
+    format($q$ select public.orders_bulk_transition(%L,
+             (select array_agg(g::text::uuid) from generate_series(1,501) g
+               cross join lateral (select gen_random_uuid() as g) x), 'packed') $q$,
+      i.rhea_tenant),
+    'an oversized batch is refused rather than attempted');
+end;
+$$;
+
+-- ---- A buyer has no business here ------------------------------------------
+select tests.logout();
+set local role anon;
+do $$
+declare
+  i record;
+  p record;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p9;
+
+  perform tests.rejects($q$ select count(*) from public.order_notes $q$,
+    'anon has no grant on order_notes');
+  perform tests.rejects(
+    format($q$ select public.orders_list(%L) $q$, i.rhea_tenant),
+    'nor can anon list a store''s orders');
+  perform tests.rejects(
+    format($q$ select public.order_detail(%L) $q$, p.rhea_order),
+    'nor read one');
+  perform tests.rejects(
+    format($q$ select public.orders_bulk_transition(%L, array[%L]::uuid[], 'shipped') $q$,
+      i.rhea_tenant, p.rhea_order),
+    'nor move one');
+  perform tests.rejects(
+    format($q$ select public.orders_packing_batch(%L, array[%L]::uuid[]) $q$,
+      i.rhea_tenant, p.rhea_order),
+    'nor print a batch of a seller''s customer addresses');
+  perform tests.rejects(
+    format($q$ select public.create_manual_order(%L, 'x', '+639171234567',
+             '{}'::jsonb, '[]'::jsonb) $q$, i.rhea_tenant),
+    'nor create an order in someone''s store');
+end;
+$$;
+
+reset role;
+set local role authenticated;
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+
+-- ---------------------------------------------------------------------------
 -- my_tenants()
 -- ---------------------------------------------------------------------------
 \echo ''
@@ -2451,8 +2711,8 @@ declare v_passed int := coalesce(nullif(current_setting('tests.passed', true), '
 begin
   raise notice '';
   raise notice '=== % assertions passed', v_passed;
-  if v_passed < 290 then
-    raise exception 'Expected at least 290 assertions, only % ran — did a section get skipped?', v_passed
+  if v_passed < 320 then
+    raise exception 'Expected at least 320 assertions, only % ran — did a section get skipped?', v_passed
       using errcode = 'triggered_action_exception';
   end if;
 end;
