@@ -715,15 +715,257 @@ export type Database = {
           },
         ]
       }
-      customers: {
+      customer_addresses: {
+        Row: {
+          barangay_code: string
+          city_code: string
+          created_at: string
+          customer_id: string
+          id: string
+          is_default: boolean
+          label: string | null
+          landmark: string | null
+          phone: string
+          postal_code: string | null
+          province_code: string | null
+          recipient: string
+          region_code: string
+          street: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          barangay_code: string
+          city_code: string
+          created_at?: string
+          customer_id: string
+          id?: string
+          is_default?: boolean
+          label?: string | null
+          landmark?: string | null
+          phone: string
+          postal_code?: string | null
+          province_code?: string | null
+          recipient: string
+          region_code: string
+          street: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          barangay_code?: string
+          city_code?: string
+          created_at?: string
+          customer_id?: string
+          id?: string
+          is_default?: boolean
+          label?: string | null
+          landmark?: string | null
+          phone?: string
+          postal_code?: string | null
+          province_code?: string | null
+          recipient?: string
+          region_code?: string
+          street?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_addresses_tenant_id_customer_id_fkey"
+            columns: ["tenant_id", "customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "customer_addresses_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_addresses_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      customer_segments: {
         Row: {
           created_at: string
-          email: string | null
-          fb_psid: string | null
+          created_by: string | null
+          definition: Json
+          description: string | null
+          id: string
+          is_pinned: boolean
+          name: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          definition?: Json
+          description?: string | null
+          id?: string
+          is_pinned?: boolean
+          name: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          definition?: Json
+          description?: string | null
+          id?: string
+          is_pinned?: boolean
+          name?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_segments_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_segments_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_segments_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      customer_tag_assignments: {
+        Row: {
+          assigned_by: string | null
+          created_at: string
+          customer_id: string
+          tag_id: string
+          tenant_id: string
+        }
+        Insert: {
+          assigned_by?: string | null
+          created_at?: string
+          customer_id: string
+          tag_id: string
+          tenant_id: string
+        }
+        Update: {
+          assigned_by?: string | null
+          created_at?: string
+          customer_id?: string
+          tag_id?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_tag_assignments_assigned_by_fkey"
+            columns: ["assigned_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_tag_assignments_tenant_id_customer_id_fkey"
+            columns: ["tenant_id", "customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "customer_tag_assignments_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_tag_assignments_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_tag_assignments_tenant_id_tag_id_fkey"
+            columns: ["tenant_id", "tag_id"]
+            isOneToOne: false
+            referencedRelation: "customer_tags"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
+      customer_tags: {
+        Row: {
+          colour: string
+          created_at: string
           id: string
           name: string
+          tenant_id: string
+        }
+        Insert: {
+          colour?: string
+          created_at?: string
+          id?: string
+          name: string
+          tenant_id: string
+        }
+        Update: {
+          colour?: string
+          created_at?: string
+          id?: string
+          name?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "customer_tags_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "customer_tags_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      customers: {
+        Row: {
+          cancelled_orders: number
+          created_at: string
+          delivered_orders: number
+          email: string | null
+          fb_psid: string | null
+          first_order_at: string | null
+          id: string
+          last_order_at: string | null
+          name: string
           notes: string | null
+          pending_spent_centavos: number
           phone: string
+          rts_orders: number
           source: string
           tenant_id: string
           total_orders: number
@@ -731,13 +973,19 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          cancelled_orders?: number
           created_at?: string
+          delivered_orders?: number
           email?: string | null
           fb_psid?: string | null
+          first_order_at?: string | null
           id?: string
+          last_order_at?: string | null
           name: string
           notes?: string | null
+          pending_spent_centavos?: number
           phone: string
+          rts_orders?: number
           source?: string
           tenant_id: string
           total_orders?: number
@@ -745,13 +993,19 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          cancelled_orders?: number
           created_at?: string
+          delivered_orders?: number
           email?: string | null
           fb_psid?: string | null
+          first_order_at?: string | null
           id?: string
+          last_order_at?: string | null
           name?: string
           notes?: string | null
+          pending_spent_centavos?: number
           phone?: string
+          rts_orders?: number
           source?: string
           tenant_id?: string
           total_orders?: number
@@ -4738,6 +4992,80 @@ export type Database = {
         }
       }
       current_tenant_id: { Args: never; Returns: string }
+      customer_profile: { Args: { p_customer_id: string }; Returns: Json }
+      customer_segment_count: {
+        Args: { p_definition: Json; p_tenant_id: string }
+        Returns: number
+      }
+      customer_segment_match: {
+        Args: {
+          p_definition: Json
+          p_limit?: number
+          p_offset?: number
+          p_tenant_id: string
+        }
+        Returns: {
+          delivered_orders: number
+          email: string
+          id: string
+          last_order_at: string
+          name: string
+          pending_spent_centavos: number
+          phone: string
+          rts_orders: number
+          source: string
+          total_orders: number
+          total_spent_centavos: number
+        }[]
+      }
+      customer_segment_preview: {
+        Args: {
+          p_definition: Json
+          p_limit?: number
+          p_offset?: number
+          p_tenant_id: string
+        }
+        Returns: Json
+      }
+      customer_segment_save: {
+        Args: {
+          p_definition: Json
+          p_description?: string
+          p_id?: string
+          p_name: string
+          p_pinned?: boolean
+          p_tenant_id: string
+        }
+        Returns: string
+      }
+      customer_segments_list: { Args: { p_tenant_id: string }; Returns: Json }
+      customer_stats_refresh: {
+        Args: { p_customer_id: string }
+        Returns: undefined
+      }
+      customers_import: {
+        Args: {
+          p_rows: Json
+          p_source?: string
+          p_tag_name?: string
+          p_tenant_id: string
+        }
+        Returns: Json
+      }
+      customers_list: {
+        Args: {
+          p_limit?: number
+          p_offset?: number
+          p_search?: string
+          p_sort?: string
+          p_tenant_id: string
+        }
+        Returns: Json
+      }
+      customers_merge: {
+        Args: { p_keep_id: string; p_merge_id: string }
+        Returns: Json
+      }
       default_auto_replies: {
         Args: never
         Returns: {
@@ -4939,6 +5267,7 @@ export type Database = {
         Returns: Json
       }
       ph_national_digits: { Args: { p_input: string }; Returns: string }
+      ph_phone_e164: { Args: { p_input: string }; Returns: string }
       public_tracking: {
         Args: { p_domain: string; p_order_number: string; p_slug: string }
         Returns: Json

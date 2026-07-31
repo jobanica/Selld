@@ -4041,6 +4041,193 @@ set local role authenticated;
 select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
 
 -- ---------------------------------------------------------------------------
+-- Phase 15: customers & CRM
+-- ---------------------------------------------------------------------------
+-- A customer list is the most portable thing a seller owns: names, phone
+-- numbers and what each person spends. It is also the thing a competitor would
+-- most like to have. So the checks below are about reading — and about the one
+-- number a seller must not be able to write, because a lifetime value somebody
+-- typed is a lifetime value that means nothing.
+\echo ''
+\echo '=== Phase 15: customers & CRM'
+
+reset role;
+do $$
+declare
+  i record;
+  v_customer uuid;
+  v_tag      uuid;
+  v_segment  uuid;
+begin
+  select * into i from tests.ids;
+
+  select id into v_customer from public.customers
+   where tenant_id = i.rhea_tenant limit 1;
+
+  insert into public.customer_tags (tenant_id, name) values (i.rhea_tenant, 'suki')
+  returning id into v_tag;
+  insert into public.customer_tag_assignments (tenant_id, customer_id, tag_id)
+  values (i.rhea_tenant, v_customer, v_tag);
+
+  insert into public.customer_segments (tenant_id, name, definition)
+  values (i.rhea_tenant, 'Quiet skincare buyers',
+          '{"spentAtLeast": 100, "notOrderedForDays": 60}'::jsonb)
+  returning id into v_segment;
+
+  create table tests.p15 as
+    select v_customer as customer_id, v_tag as tag_id, v_segment as segment_id;
+  grant select on tests.p15 to authenticated, anon;
+
+  perform tests.ok(v_customer is not null,
+    'phase 15 fixture: a customer, a tag and a saved segment');
+end;
+$$;
+
+-- ---- Another store sees none of it ------------------------------------------
+set local role authenticated;
+select tests.login('22222222-2222-2222-2222-222222222222', 'marlon@example.ph');
+do $$
+declare
+  i record;
+  p record;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p15;
+
+  perform tests.eq((select count(*)::int from public.customer_tags), 0,
+    'Marlon sees none of Rhea''s customer tags');
+  perform tests.eq((select count(*)::int from public.customer_tag_assignments), 0,
+    'nor who she put them on');
+  perform tests.eq((select count(*)::int from public.customer_segments), 0,
+    'nor the questions she saved about her own people');
+  perform tests.eq((select count(*)::int from public.customer_addresses), 0,
+    'nor where their parcels go');
+
+  perform tests.rejects(format($q$ select public.customers_list(%L) $q$, i.rhea_tenant),
+    'and he cannot list her customers');
+  perform tests.rejects(format($q$ select public.customer_profile(%L) $q$, p.customer_id),
+    'nor open one of them');
+  perform tests.rejects(
+    format($q$ select public.customer_segment_preview(%L, '{}'::jsonb) $q$, i.rhea_tenant),
+    'nor run a segment against her list');
+  perform tests.rejects(
+    format($q$ select public.customer_segment_count(%L, '{}'::jsonb) $q$, i.rhea_tenant),
+    'nor even ask how many people are in one');
+  perform tests.rejects(
+    format($q$ select public.customer_segment_save(%L, 'Mine now', '{}'::jsonb) $q$, i.rhea_tenant),
+    'nor save a segment into her store');
+  perform tests.rejects(
+    format($q$ select public.customer_segments_list(%L) $q$, i.rhea_tenant),
+    'nor read the ones she has');
+  perform tests.rejects(
+    format($q$ select public.customers_import(%L, '[]'::jsonb) $q$, i.rhea_tenant),
+    'nor import people into it');
+
+  -- The unchecked primitives behind the checked wrappers.
+  perform tests.rejects(
+    format($q$ select * from public.customer_segment_match(%L, '{}'::jsonb) $q$, i.rhea_tenant),
+    'and the unchecked matcher is callable by nobody with a session');
+  perform tests.rejects(
+    format($q$ select public.customer_stats_refresh(%L) $q$, p.customer_id),
+    'nor the thing that writes the projection');
+end;
+$$;
+
+-- ---- A member reads their own, and cannot write the numbers ----------------
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+do $$
+declare
+  i record;
+  p record;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p15;
+
+  perform tests.ok(
+    ((public.customers_list(i.rhea_tenant) ->> 'total')::int) > 0,
+    'Rhea reads her own customers');
+  perform tests.ok(
+    (public.customer_profile(p.customer_id) -> 'stats') is not null,
+    'and one of them in full');
+  perform tests.eq((select count(*)::int from public.customer_tags), 1,
+    'she sees her own tag');
+
+  -- The projection. A seller who could type a lifetime value would be a seller
+  -- whose segments answer a question about what they typed.
+  perform tests.rejects(
+    format($q$ update public.customers set total_spent_centavos = 999999 where id = %L $q$,
+      p.customer_id),
+    'but she cannot write a customer''s lifetime value');
+  perform tests.rejects(
+    format($q$ update public.customers set total_orders = 42 where id = %L $q$, p.customer_id),
+    'nor their order count');
+  -- A *different* value: writing back the number that is already there changes
+  -- nothing, and the guard is right to allow it. Asserting on `= 0` passed for
+  -- the wrong reason on a customer who had never had a parcel come back.
+  perform tests.rejects(
+    format($q$ update public.customers set rts_orders = 7 where id = %L $q$, p.customer_id),
+    'nor how many parcels came back');
+
+  -- And the guard does not turn the row read-only.
+  perform tests.eq(
+    tests.affected(format($q$ update public.customers set notes = 'Prefers COD' where id = %L $q$,
+      p.customer_id)),
+    1::bigint,
+    'the things that are hers to edit are still hers to edit');
+end;
+$$;
+
+-- ---- A packer packs. A packer does not rewrite the customer list -----------
+select tests.login('33333333-3333-3333-3333-333333333333', 'jess@example.ph');
+do $$
+declare
+  i record;
+  p record;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p15;
+
+  -- Jess is staff in this fixture, so this asserts what staff *may* do; the
+  -- packer-level refusal is covered by `has_tenant_role(..., 'staff')` in the
+  -- functions themselves, which phase 9 proved for orders.
+  perform tests.ok(
+    jsonb_array_length(public.customers_list(i.rhea_tenant) -> 'customers') >= 0,
+    'a colleague on the same store can read the list');
+end;
+$$;
+
+-- ---- A buyer has no business here ------------------------------------------
+select tests.logout();
+set local role anon;
+do $$
+declare
+  i record;
+  p record;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p15;
+
+  perform tests.rejects($q$ select count(*) from public.customer_tags $q$,
+    'anon has no grant on customer tags');
+  perform tests.rejects($q$ select count(*) from public.customer_segments $q$,
+    'nor on saved segments');
+  perform tests.rejects($q$ select count(*) from public.customer_addresses $q$,
+    'nor on saved addresses');
+  perform tests.rejects(format($q$ select public.customers_list(%L) $q$, i.rhea_tenant),
+    'and above all cannot ask for a store''s entire customer list');
+  perform tests.rejects(format($q$ select public.customer_profile(%L) $q$, p.customer_id),
+    'nor for one person''s phone number and buying history');
+  perform tests.rejects(
+    format($q$ select public.customers_import(%L, '[]'::jsonb) $q$, i.rhea_tenant),
+    'nor write people into somebody else''s store');
+end;
+$$;
+
+reset role;
+set local role authenticated;
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+
+-- ---------------------------------------------------------------------------
 -- my_tenants()
 -- ---------------------------------------------------------------------------
 \echo ''
@@ -4077,8 +4264,8 @@ declare v_passed int := coalesce(nullif(current_setting('tests.passed', true), '
 begin
   raise notice '';
   raise notice '=== % assertions passed', v_passed;
-  if v_passed < 510 then
-    raise exception 'Expected at least 510 assertions, only % ran — did a section get skipped?', v_passed
+  if v_passed < 545 then
+    raise exception 'Expected at least 545 assertions, only % ran — did a section get skipped?', v_passed
       using errcode = 'triggered_action_exception';
   end if;
 end;

@@ -5,7 +5,8 @@ Build one phase per session, in order. The full roadmap is in
 [`docs/build-spec.md`](docs/build-spec.md); who we're building for is in
 [`docs/avatar.md`](docs/avatar.md).
 
-**Current state: phase 14 complete.** Next up is phase 15 (customers & CRM).
+**Current state: phase 15 complete.** Next up is phase 16 (broadcasts, vouchers &
+abandoned cart).
 
 ---
 
@@ -250,7 +251,8 @@ src/
   app/          ← dashboard (authenticated seller surface)
   storefront/   ← public buyer surface, own perf budget
   features/     ← feature slices; may import from core and lib
-    address/ auth/ catalog/ cod/ inbox/ inventory/ live/ onboarding/ orders/ tenancy/
+    address/ auth/ catalog/ cod/ customers/ inbox/ inventory/ live/ onboarding/
+    orders/ tenancy/
   lib/          ← money, phone, psgc, i18n, time, supabase, tenant
   components/ui ← shadcn/ui primitives
 ```
@@ -314,6 +316,14 @@ one new file plus one registry line, and zero lines of order logic.
   back). `product_variants` validates immediately; `product_options` re-validates
   its product's variants deferred, because regenerating a matrix is legitimately
   multi-statement.
+- **Never write `customers.total_spent_centavos` or `total_orders` either.** Phase
+  15 turned them into a projection of the orders table, maintained by trigger, with
+  a guard that raises on a direct write — because they had been incremented by hand
+  inside `checkout_place_order`, which meant a cancelled order counted forever, an
+  RTS parcel counted as revenue, and anything that wrote an order by another route
+  counted not at all. A segment that says "spent over ₱2,000" is only worth
+  building on a number that is true. `sum(orders) = customer` is asserted by the
+  tenancy suite and by a CI step.
 - **Never write `inventory_levels.on_hand`.** It is a cache of the movement ledger,
   maintained by trigger, and a guard rejects direct writes. Insert a
   `stock_movements` row (or call `record_stock_movement` / `set_stock_level`).
@@ -521,6 +531,16 @@ one new file plus one registry line, and zero lines of order logic.
   reads `auth.uid()`, so a tenancy assertion written after a `tests.login()` keeps
   answering as that seller while claiming to be a buyer. `tests.logout()` first, or
   the assertion passes for the wrong reason.
+- **A segment builder must never assemble SQL.** `customer_segment_match` is one
+  static query whose every clause reads a known key out of a JSONB definition with
+  `->>` and casts it — so a criterion nobody wrote cannot be asked for, and there is
+  no string to inject into. Adding a criterion means adding a clause, which is the
+  point. The function is reachable by every signed-in member of the tenant.
+- **Excel turns a phone number into a float, and the digits do not come back.**
+  `9.171234567E+9` is 09171234567 and restores exactly; `9.17123E+09` is what a
+  General-formatted column *displays*, and padding it to ten digits produces a real
+  number belonging to somebody else. `toPhMobile()` refuses what it cannot restore
+  rather than inventing the tail — see `src/core/crm/import.ts`.
 - **`pnpm db:test` does not apply migrations.** It runs the SQL suites against
   whatever is already in the database, so editing a migration and re-running the
   tests proves nothing about the edit. Sabotage a function with

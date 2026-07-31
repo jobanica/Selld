@@ -9,6 +9,7 @@ import { RequireAuth } from '@/features/auth/require-auth'
 import { SessionProvider } from '@/features/auth/session-provider'
 import { ProductListPage } from '@/features/catalog/product-list-page'
 import { CodPage } from '@/features/cod/cod-page'
+import { CustomersPage } from '@/features/customers/customers-page'
 import { InboxPage } from '@/features/inbox/inbox-page'
 import { InventoryPage } from '@/features/inventory/inventory-page'
 import { LivePage } from '@/features/live/live-page'
@@ -31,7 +32,7 @@ export default function DashboardApp() {
   // renders a placeholder rather than 404ing.
   const implemented = new Set([
     '/', '/orders', '/products', '/inventory', '/shipping', '/payments', '/cod', '/live',
-    '/inbox',
+    '/inbox', '/customers',
   ])
   const pending = ALL_NAV_ITEMS.filter((item) => !implemented.has(item.to))
 
@@ -59,6 +60,7 @@ export default function DashboardApp() {
             <Route path="/cod" element={<CodPage />} />
             <Route path="/live" element={<LivePage />} />
             <Route path="/inbox" element={<InboxPage />} />
+            <Route path="/customers" element={<CustomersPage />} />
             {/* Where the Facebook OAuth callback sends the seller back to. */}
             <Route path="/settings/social" element={<InboxPage />} />
             {pending.map((item) => (

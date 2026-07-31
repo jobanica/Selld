@@ -301,7 +301,11 @@ jobs:
                 'record_post_comment', 'record_comment_reply', 'record_comment_dm',
                 'message_send_allowed_raw', 'auto_reply_for_raw', 'tenant_store_url',
                 'inbox_threads', 'inbox_thread', 'inbox_mark_read',
-                'message_send_allowed', 'auto_reply_for', 'social_account_disconnect'
+                'message_send_allowed', 'auto_reply_for', 'social_account_disconnect',
+                'customers_list', 'customer_profile', 'customer_segment_preview',
+                'customer_segment_count', 'customer_segment_save', 'customer_segments_list',
+                'customers_merge', 'customers_import',
+                'customer_segment_match', 'customer_stats_refresh'
               ]
               loop
                 if exists (
@@ -529,6 +533,75 @@ jobs:
                 raise exception 'page token is reachable: %', array_to_string(v_leaks, ', ');
               end if;
               raise notice 'page access tokens are unreadable by any client role OK';
+              raise exception 'rollback';
+            exception when others then
+              if sqlerrm <> 'rollback' then raise; end if;
+            end
+            \$\$;
+          "
+
+      # A customer's lifetime value is a projection of their orders, maintained by
+      # trigger. The invariant is the same shape as `sum(delta) = on_hand` for
+      # inventory, and it is asserted the same way: recompute from the ledger and
+      # compare. Anything that starts writing those columns by hand — a helpful
+      # backfill, a migration that "just sets it" — fails here.
+      - name: Customer totals equal a recomputation from their orders
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h 127.0.0.1 -p 54322 -U postgres -v ON_ERROR_STOP=1 -c "
+            do \$\$
+            declare
+              v_tenant   uuid;
+              v_customer uuid;
+              v_drift    int;
+            begin
+              insert into public.tenants (name, slug, status)
+              values ('CI CRM', 'ci-crm', 'active') returning id into v_tenant;
+              insert into public.customers (tenant_id, name, phone)
+              values (v_tenant, 'CI Buyer', '+639171230001') returning id into v_customer;
+
+              insert into public.orders
+                (tenant_id, order_number, customer_id, contact_name, contact_phone,
+                 shipping_address, subtotal_centavos, grand_total_centavos,
+                 payment_method, payment_status, fulfillment_status)
+              values
+                (v_tenant, 'C1', v_customer, 'CI Buyer', '+639171230001', '{}'::jsonb,
+                 100000, 100000, 'cod', 'unpaid', 'delivered'),
+                (v_tenant, 'C2', v_customer, 'CI Buyer', '+639171230001', '{}'::jsonb,
+                 50000, 50000, 'cod', 'unpaid', 'rts'),
+                (v_tenant, 'C3', v_customer, 'CI Buyer', '+639171230001', '{}'::jsonb,
+                 70000, 70000, 'cod', 'unpaid', 'cancelled');
+
+              select count(*)::int into v_drift
+              from public.customers c
+                join lateral (
+                  select
+                    count(*) filter (where o.fulfillment_status <> 'cancelled')::int as orders,
+                    coalesce(sum(o.grand_total_centavos) filter (
+                      where o.fulfillment_status = 'delivered'
+                         or o.payment_status = 'paid'), 0) as spent
+                  from public.orders o where o.customer_id = c.id) t on true
+              where c.id = v_customer
+                and (c.total_orders <> t.orders or c.total_spent_centavos <> t.spent);
+
+              if v_drift > 0 then
+                raise exception 'a customer total does not match its orders';
+              end if;
+
+              -- 100000 delivered; the RTS and the cancellation are not revenue.
+              if (select total_spent_centavos from public.customers where id = v_customer) <> 100000 then
+                raise exception 'lifetime value counted money that never arrived';
+              end if;
+
+              begin
+                update public.customers set total_spent_centavos = 1 where id = v_customer;
+                raise exception 'the projection is writable by hand';
+              exception when check_violation then
+                null;
+              end;
+
+              raise notice 'customer totals are a projection of their orders OK';
               raise exception 'rollback';
             exception when others then
               if sqlerrm <> 'rollback' then raise; end if;

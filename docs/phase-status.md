@@ -1492,3 +1492,82 @@ able to open a conversation with someone who has never written to it.
 
 **Gate:** `pnpm verify` (476 tests), `pnpm db:test` (528 assertions),
 `pnpm db:test:concurrency`. All 19 migrations apply from scratch on PG 17.6.
+
+---
+
+## Phase 15 — Customers & CRM
+
+**Done when:** "customers who bought skincare, spent over ₱2,000, haven't ordered
+in 60 days, zero RTS" is a saved segment.
+
+**Measured** against a fixture built out of near misses, because the near misses
+are what prove a segment rather than a filter that happens to return people:
+
+| Customer | Why they are in, or out |
+|---|---|
+| Ana Reyes | **in** — bought a *serum*, a child of Skincare; ₱2,500 delivered; quiet 90 days |
+| Fely Mendoza | **in** — exactly ₱2,000, and the bar says "at least" |
+| Gina Bautista | **in** — cancelled an order yesterday, and a cancellation is not an order |
+| Bea Cruz | out — ₱1,999, one peso short |
+| Carla Lim | out — ordered 30 days ago |
+| Divina Santos | out — one parcel came back |
+| Elena Tan | out — bought bags |
+| Hazel Ong | out — ₱2,500 promised, still unpaid in a van |
+
+Saved, then re-read with a **live** count; Ana orders again and drops out of her
+own segment on the next read. In the browser at 390px the count narrows
+6 → 5 → 4 → 3 → 2 as each condition is added, which is the whole interface.
+
+### What shipped
+
+- **Lifetime value that is true.** `customers.total_spent_centavos` and
+  `total_orders` were incremented by hand inside `checkout_place_order`. They are
+  now a **projection of the orders table**, recomputed by trigger, with a guard
+  that raises on a direct write — plus `pending_spent_centavos`,
+  `delivered_orders`, `rts_orders`, `cancelled_orders`, `first_order_at` and
+  `last_order_at`.
+- **A segment engine that is one static query.** Eleven criteria, each read out
+  of a JSONB definition by key and cast — never concatenated. A category matches
+  the categories under it, "hasn't ordered in 60 days" includes people who have
+  never ordered, and "zero RTS" means zero.
+- **Saved segments** that store the question rather than the answer, so the count
+  is right the morning after.
+- **Customer profiles** with order history, tags, saved addresses, and an RTS
+  rate computed over parcels that *reached a conclusion* rather than over
+  everything ever placed.
+- **Import** from Shopee, Lazada and TikTok Shop order exports and from a
+  spreadsheet somebody typed — header found under the branding rows, the
+  *receiver* preferred over the username, one buyer's nine orders collapsed into
+  one person, and every number normalised to `+63…` before it is stored.
+- **Merge**, which repoints orders, carts, addresses and Messenger threads,
+  keeps whatever the survivor was missing, and lets the projection recompute
+  itself.
+
+### Notable findings
+
+| Symptom | Cause |
+|---|---|
+| Lifetime value counted money that never arrived | The hand-rolled increment ran once at checkout and never again, so a cancellation, an RTS and a refund were all invisible to it. Recomputation from the ledger cannot drift; an incremental counter is wrong forever the first time a path is missed. |
+| A phone number Excel had mangled would have become somebody else's | `9.17123E+09` is a *displayed* value with the tail already gone. Padding it to ten digits is a real, wrong number. The corpus caught it; the parser now refuses what it cannot restore. |
+| A TikTok export identified as Shopee | `Order ID` was in the Shopee fingerprint, and every marketplace on earth has a column called that. |
+| A tenancy assertion passed for the wrong reason | It wrote `rts_orders = 0` over a customer whose count was already 0, so the guard correctly saw no change. A guard test has to write a *different* value. |
+| The segment builder's count read 0 in the browser | The fixture's category was called "Skincare" and so was the demo store's, so the dropdown picked the wrong one. The engine was right; the harness was ambiguous. |
+
+### Deliberately deferred
+
+- **No automatic duplicate finder.** `customers` is unique on
+  `(tenant_id, phone)`, so a duplicate is two rows for one *person* — same human,
+  two numbers, or two spellings of a name. "Same phone" is a fact and "same
+  person" is a judgement, and merging the wrong two is not reversible, so the
+  merge takes two ids a seller chose.
+- **No segment membership snapshots.** Phase 16 sends to a segment, and *then*
+  there is a reason to record who was in it at send time — as part of the
+  broadcast, not as part of the segment.
+- **Addresses are stored and not yet offered at checkout.** The table and the
+  profile are here; wiring them into the storefront's address step is a change to
+  a page carrying a 2.0s LCP budget and belongs with its own measurement.
+- **No CSV export.** Import first: a seller arriving has a file, a seller leaving
+  has a lawyer's request, and phase 20's data-export flow is where that belongs.
+
+**Gate:** `pnpm verify` (499 tests), `pnpm db:test` (556 assertions),
+`pnpm db:test:concurrency`. All 20 migrations apply from scratch on PG 17.6.
