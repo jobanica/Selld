@@ -1181,3 +1181,106 @@ check there would tell it every seller has no credits and silence every message.
 
 **Gate:** `pnpm verify`, `pnpm db:test` (394 assertions),
 `pnpm db:test:concurrency`. All 16 migrations apply from scratch on PG 17.6.
+
+---
+
+## Phase 12 — COD reconciliation & RTS control
+
+**Done when:** a seller can answer "how much COD is the courier still holding, and
+which parcels are unaccounted for" in one screen.
+
+**Measured** in a real browser at 390px, against the real database, with a J&T
+statement file of the shape a courier actually exports — branding rows above the
+header, peso signs, a thousands separator and a footer total:
+
+| | Result |
+|---|---|
+| The screen answers the first question | **₱4,158.00 held across 11 parcels**, aged into four buckets |
+| …and the second | 4 overdue past 30 days, 1 unknown waybill, 1 short payment, listed separately |
+| Statement import: 5 lines | 3 matched, 1 variance, 1 unknown waybill |
+| Orders marked paid **by importing** | **0** — an import is a draft |
+| After posting | 3 paid, 1 partly paid (the short one) |
+| Horizontal overflow at 390px | 0 px |
+| Console errors or warnings | none |
+
+### What shipped
+
+- **Statement import for CSV *and* `.xlsx`**, parsed in the browser. Every courier
+  portal exports `.xlsx`; a seller told "convert it to CSV first" simply does not
+  use the feature.
+- **A hand-written 250-line xlsx reader** rather than SheetJS. This parses a file a
+  user uploads, so it is an attack surface, and the part of the format we need is
+  small: a ZIP of XML, cells in `sheet1.xml`, strings in `sharedStrings.xml`. No
+  formula evaluation, no external references, no macros. Inflation goes through
+  `DecompressionStream`, which browsers and Node both provide, so the tests run on
+  the same implementation that ships.
+- **Matching happens in SQL, never in the importer.** The client says "the courier
+  claims waybill X paid ₱1,450"; `cod_import_statement` decides whether X is ours,
+  whether it agrees with the order, and whether it was already paid. A client that
+  could assert `match_status` could assert that an unpaid order was paid.
+- **Import and post are two acts.** An import produces a draft with a full
+  breakdown; posting is a separate click. That costs a tap and buys an undo — an
+  import that posted immediately would turn "wrong courier in the dropdown" into
+  false paid flags spread across the order book.
+- **Five verdicts, not two.** `matched`, `variance`, `unknown_waybill`, `duplicate`,
+  `not_cod`. Only the first two post; the rest are the "unaccounted for" half of the
+  done-when and each needs a different thing done about it.
+- **`record_rts`** does the three things that must not happen separately: moves the
+  order, puts the goods back through the movement ledger with reason `rts`, and
+  records what the round trip cost. Restocking is asked, not assumed — a parcel that
+  spent two weeks on a van often comes back unsaleable, and only the person holding
+  the box knows.
+- **`buyer_risk_flags`**, an RTS rate per phone number keyed on national digits, and
+  a COD block that bites at `checkout_place_order`. The *score* never blocks anyone:
+  a computed rate can be wrong, and refusing someone's money on a signal they cannot
+  see or appeal is a decision a human makes.
+- **A cross-tenant risk pool**, opt-in in both directions, keyed by a salted hash
+  with no tenant column anywhere in the aggregate. A lookup returns the other
+  stores' numbers only — a seller reading their own contribution back would take it
+  for corroboration.
+
+### The find that matters most
+
+**A short remittance leaves the order `partial`, not `paid`** — and that fell out of
+routing posting through phase 8's `record_cod_remittance` instead of writing
+`payments` rows directly. One code path decides what "paid" means, so a parcel the
+courier paid ₱300 for against a ₱378 order lands as partly paid, with the shortfall
+visible on the order itself and not only in the variance report.
+
+Going the other way — refusing to post a variance at all — would have been worse:
+the parcel would be neither paid nor outstanding, which is the one state a
+reconciliation screen cannot explain.
+
+### Notable findings
+
+| Symptom | Cause |
+|---|---|
+| A statement's last data row silently vanished | The XML row matcher tried `<row>…</row>` before `<row/>`, so a self-closing spacer row swallowed the next real row up to its `</row>`. In a courier file that is a missing parcel with no error anywhere. Order in the alternation is load-bearing. |
+| `1,450.00` read as ₱1.50 | A naive decimal split. The separator is whichever of `.` and `,` appears *last*, which is the only rule that gets `1,450.00` and `1.450,00` both right. |
+| `COD Fee` matched as the payout column | "COD Fee" contains "cod". Fee columns are now claimed *before* amount candidates, or a seller's whole payout reads as the courier's cut. |
+| A `record` never assigned cannot be tested for null | `buyer_risk_lookup` held the shared row in a plpgsql `record`; Postgres refuses even `v_shared.x is null` on one that was never assigned. It builds jsonb instead. |
+| The sabotage sweep left a grant behind | Restoring with `revoke … from public` did not remove the EXECUTE granted directly to `authenticated` — the exact inverse of the phase-8 trap, and it broke the next suite run rather than production. |
+
+### Deliberately deferred
+
+- **No scheduler still.** Nothing polls couriers or drives phase 10's retry curve on
+  a timer; that belongs with a job runner, not a request handler.
+- **`update_rts_cost` has no screen.** The function exists and is tested — the real
+  return charge arrives weeks later on the next statement — but the UI for
+  correcting it does not.
+- **The shared pool has no settings screen.** Both flags default to off and are
+  editable through `tenant_settings`; the opt-in UI, with the explanation it
+  deserves, is a settings-page feature.
+- **Statement periods are not parsed.** `period_start`/`period_end` exist on the
+  table and are left null; couriers write the period as free text in a preamble row
+  and guessing it wrong is worse than leaving it empty.
+
+### Still needed outside the repo
+
+- A `buyer_risk_salt` row in `platform_secrets`, at least 16 characters, if the
+  cross-tenant pool is to work at all. Without one `buyer_risk_hash()` returns null
+  and every pool path quietly no-ops — deliberately, because hashing with a default
+  salt would look safe and not be.
+
+**Gate:** `pnpm verify` (442 tests), `pnpm db:test` (442 assertions),
+`pnpm db:test:concurrency`. All 17 migrations apply from scratch on PG 17.6.

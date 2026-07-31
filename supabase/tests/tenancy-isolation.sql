@@ -3099,6 +3099,366 @@ set local role authenticated;
 select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
 
 -- ---------------------------------------------------------------------------
+-- Phase 12: COD reconciliation, returns, and buyer risk
+-- ---------------------------------------------------------------------------
+-- Three things are new and each is dangerous in its own way. A remittance import
+-- decides which orders are *paid*. A return writes *inventory*. And the risk pool
+-- is the first table in the schema that deliberately spans tenants.
+\echo ''
+\echo '=== Phase 12: COD & returns'
+
+reset role;
+do $$
+declare
+  i record;
+  p record;
+  v_rts_order uuid;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p9;
+
+  -- Both parcels delivered, both COD, neither paid: money the couriers are
+  -- holding. (`record_shipment` in the phase-11 fixture already booked them.)
+  update public.shipments set status = 'delivered', delivered_at = now() - interval '35 days'
+   where tenant_id = i.rhea_tenant;
+  update public.shipments set status = 'delivered', delivered_at = now() - interval '2 days'
+   where tenant_id = i.marlon_tenant;
+  update public.orders set fulfillment_status = 'delivered'
+   where id in (p.rhea_order, p.marlon_order);
+
+  -- One more parcel of Rhea's, still out, with real order items behind it — the
+  -- return test needs something that can actually come back, and something with
+  -- units to put away.
+  insert into public.orders
+    (tenant_id, order_number, shipping_address, contact_name, contact_phone,
+     subtotal_centavos, shipping_total_centavos, grand_total_centavos,
+     payment_method, fulfillment_status, location_id)
+  values (i.rhea_tenant, 'R-RTS-1',
+          '{"cityName":"Davao City","provinceName":"Davao Del Sur"}'::jsonb,
+          'Aileen Ramos', '+639171239876', 50000, 10000, 60000, 'cod', 'shipped',
+          (select id from public.locations where tenant_id = i.rhea_tenant limit 1))
+  returning id into v_rts_order;
+
+  insert into public.order_items
+    (tenant_id, order_id, variant_id, product_name, sku, qty,
+     unit_price_centavos, line_total_centavos)
+  select i.rhea_tenant, v_rts_order, v.id, 'Returned item', v.sku, 2, 25000, 50000
+  from public.product_variants v where v.tenant_id = i.rhea_tenant limit 1;
+
+  create table tests.p12 as select v_rts_order as rts_order;
+  grant select on tests.p12 to authenticated, anon;
+
+  perform tests.pass('phase 12 fixture: a delivered COD parcel in each tenant, and one still out');
+end;
+$$;
+
+-- ---- The screen is scoped, and so is every number on it --------------------
+set local role authenticated;
+select tests.login('22222222-2222-2222-2222-222222222222', 'marlon@example.ph');
+do $$
+declare
+  i record;
+  v_mine jsonb;
+begin
+  select * into i from tests.ids;
+
+  v_mine := public.cod_reconciliation(i.marlon_tenant);
+  perform tests.eq((v_mine #>> '{outstanding,count}')::int, 1,
+    'Marlon''s COD screen shows his own outstanding parcel');
+  perform tests.ok(v_mine::text not like '%JT-RHEA%',
+    'and none of Rhea''s waybills anywhere in the payload');
+
+  perform tests.rejects(
+    format($q$ select public.cod_reconciliation(%L) $q$, i.rhea_tenant),
+    'and he cannot ask for her COD position at all');
+
+  perform tests.rejects(
+    format($q$ select public.cod_import_statement(%L, 'jnt', '[]'::jsonb) $q$, i.rhea_tenant),
+    'nor import a statement into her books');
+  perform tests.rejects(
+    format($q$ select public.rts_report(%L) $q$, i.rhea_tenant),
+    'nor read her returns');
+  perform tests.rejects(
+    format($q$ select public.buyer_risk_lookup(%L, '+639171234567') $q$, i.rhea_tenant),
+    'nor look up what she knows about a buyer');
+end;
+$$;
+
+-- ---- Importing decides nothing the client asked for ------------------------
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+do $$
+declare
+  i record;
+  p record;
+  v_batch jsonb;
+  v_id    uuid;
+  v_due   bigint;
+  v_was   text;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p9;
+  select grand_total_centavos, payment_status into v_due, v_was
+    from public.orders where id = p.rhea_order;
+
+  -- Four lines: right, short, a waybill that is not ours, and a repeat.
+  v_batch := public.cod_import_statement(i.rhea_tenant, 'jnt', jsonb_build_array(
+    jsonb_build_object('waybill', 'JT-RHEA-1', 'amount', v_due,     'fee', 0),
+    jsonb_build_object('waybill', 'JT-RHEA-1', 'amount', v_due,     'fee', 0),
+    jsonb_build_object('waybill', 'JT-MARLON-1', 'amount', 100000,  'fee', 0),
+    jsonb_build_object('waybill', 'JT-NOBODY',   'amount', 50000,   'fee', 0)
+  ), 'PAYOUT-TEST-1', 'test.csv', null);
+  v_id := (v_batch ->> 'id')::uuid;
+
+  perform tests.eq((v_batch #>> '{byStatus,matched,count}')::int, 1,
+    'the line that agrees with the order is matched');
+  perform tests.eq((v_batch #>> '{byStatus,duplicate,count}')::int, 1,
+    'the same waybill twice in one file is a duplicate, not a second payment');
+  perform tests.eq((v_batch #>> '{byStatus,unknown_waybill,count}')::int, 2,
+    'and a waybill from another tenant is as unknown as one that does not exist');
+
+  -- That last one is the assertion that matters most on this surface. Matching
+  -- on the waybill alone would let another seller's payout mark *her* order
+  -- paid — and waybills are printed on every parcel that passes through a hub.
+  perform tests.eq((select count(*)::int from public.cod_remittance_lines
+                     where remittance_id = v_id and shipment_id is not null), 1,
+    'exactly one line resolved to a parcel, and it is her own');
+
+  -- Compared against what it was, not against a literal: earlier phases leave
+  -- this order part-paid, and a test that hard-codes `unpaid` would be asserting
+  -- the fixture rather than the behaviour.
+  perform tests.eq((select payment_status from public.orders where id = p.rhea_order),
+    v_was, 'importing a draft changes no order''s payment status');
+
+  -- Posting is the act that moves money.
+  perform public.cod_post_remittance(v_id);
+  perform tests.eq((select payment_status from public.orders where id = p.rhea_order),
+    'paid', 'posting does');
+  perform tests.eq(
+    (public.cod_post_remittance(v_id)) ->> 'outcome', 'already_posted',
+    'and posting again is refused rather than paying twice');
+  perform tests.eq((select count(*)::int from public.payments
+                     where order_id = p.rhea_order and provider = 'cod'
+                       and proof_note like '%PAYOUT-TEST-1%'), 1,
+    'so the statement produced exactly one COD payment, not two');
+
+  -- A courier's next payout file overlaps the last one — routinely, because they
+  -- resend a period rather than a delta. The second copy has to land as a
+  -- duplicate, or the seller's books show the same parcel paid twice.
+  v_batch := public.cod_import_statement(i.rhea_tenant, 'jnt', jsonb_build_array(
+    jsonb_build_object('waybill', 'JT-RHEA-1', 'amount', v_due, 'fee', 0)
+  ), 'PAYOUT-TEST-2', 'overlap.csv', null);
+
+  perform tests.eq((v_batch #>> '{byStatus,duplicate,count}')::int, 1,
+    'a parcel that appears again in the *next* statement is a duplicate too');
+  perform tests.eq(
+    (public.cod_post_remittance((v_batch ->> 'id')::uuid)) ->> 'posted', '0',
+    'so posting that statement pays nothing');
+  perform tests.eq((select count(*)::int from public.payments
+                     where order_id = p.rhea_order and provider = 'cod'), 1,
+    'and the order still carries exactly one COD payment');
+end;
+$$;
+
+-- Marlon's order is untouched by a statement imported into her tenant. Checked
+-- with RLS out of the way, because *she* cannot see his row at all — and "the
+-- query returned nothing" would pass whether or not his order got paid.
+reset role;
+do $$
+declare p record;
+begin
+  select * into p from tests.p9;
+  perform tests.eq((select payment_status from public.orders where id = p.marlon_order),
+    'unpaid', 'and Marlon''s parcel is not paid off by her statement');
+end;
+$$;
+
+set local role authenticated;
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+
+-- ---- Nobody edits the matching by hand -------------------------------------
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+
+  -- Read-only grants throughout: a seller who could write `match_status` could
+  -- mark an unremitted parcel paid without a courier ever paying.
+  perform tests.rejects(
+    $q$ update public.cod_remittance_lines set match_status = 'matched' $q$,
+    'not even an owner can rewrite what a statement line means');
+  perform tests.rejects(
+    $q$ update public.cod_remittances set status = 'posted' $q$,
+    'nor mark a statement posted by hand');
+  perform tests.rejects(
+    format($q$ insert into public.order_rts (tenant_id, order_id, reason)
+               values (%L, %L, 'other') $q$, i.rhea_tenant, (select rhea_order from tests.p9)),
+    'nor write a return straight into the table');
+  perform tests.rejects(
+    format($q$ update public.buyer_risk_flags set rts_count = 0 where tenant_id = %L $q$,
+      i.rhea_tenant),
+    'nor edit a buyer''s history to clear the score');
+end;
+$$;
+
+-- ---- A return is warehouse work; a statement is not ------------------------
+select tests.login('33333333-3333-3333-3333-333333333333', 'jess@example.ph');
+do $$
+declare
+  i record;
+  v_order uuid;
+  v_before int;
+  v_res jsonb;
+begin
+  select * into i from tests.ids;
+
+  -- The parcel that is still out. An order that reached a terminal status
+  -- cannot come back, and `record_rts` says so.
+  select rts_order into v_order from tests.p12;
+
+  perform tests.rejects(
+    format($q$ select public.cod_import_statement(%L, 'jnt', '[]'::jsonb) $q$, i.rhea_tenant),
+    'a packer cannot import a remittance statement — that is a money decision');
+
+  -- But receiving a returned parcel is exactly the job the role exists for.
+  -- Guarding this with `staff` would lock the packer out of the box they are
+  -- holding, which is the phase-9 lesson: `packer` ranks *below* `staff`.
+  select coalesce(sum(on_hand), 0)::int into v_before
+  from public.inventory_levels where tenant_id = i.rhea_tenant;
+
+  v_res := public.record_rts(v_order, 'buyer_unreachable', true, 12000, 'Rider tried 3x');
+  perform tests.eq(v_res ->> 'outcome', 'recorded',
+    'but a packer can record a return');
+  perform tests.eq((select fulfillment_status from public.orders where id = v_order), 'rts',
+    'which moves the order');
+  perform tests.ok(
+    (select coalesce(sum(on_hand), 0)::int from public.inventory_levels
+      where tenant_id = i.rhea_tenant) > v_before,
+    'and puts the goods back on the shelf');
+
+  -- Twice must not restock twice: two packers opening the same box, or one
+  -- double-tapping a phone, would otherwise invent inventory that is not there.
+  v_before := (select coalesce(sum(on_hand), 0)::int from public.inventory_levels
+                where tenant_id = i.rhea_tenant);
+  perform tests.eq(
+    (public.record_rts(v_order, 'buyer_unreachable', true, 12000, null)) ->> 'outcome',
+    'already_recorded', 'recording the same return twice is refused');
+  perform tests.eq(
+    (select coalesce(sum(on_hand), 0)::int from public.inventory_levels
+      where tenant_id = i.rhea_tenant), v_before,
+    'and the stock did not move a second time');
+
+  -- The movement is on the ledger with its own reason, not an anonymous
+  -- adjustment: `sum(delta) = on_hand` is asserted elsewhere and only holds if
+  -- returns go through it.
+  perform tests.ok(
+    exists (select 1 from public.stock_movements
+             where tenant_id = i.rhea_tenant and reason = 'rts' and reference_id = v_order),
+    'and it is on the movement ledger as an RTS, not as an adjustment');
+end;
+$$;
+
+-- ---- The risk score is derived, and the block is a decision ----------------
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+do $$
+declare
+  i record;
+  v_phone text;
+  v_risk  jsonb;
+begin
+  select * into i from tests.ids;
+  select contact_phone into v_phone from public.orders
+   where tenant_id = i.rhea_tenant and fulfillment_status = 'rts' limit 1;
+
+  v_risk := public.buyer_risk_lookup(i.rhea_tenant, v_phone);
+  perform tests.ok((v_risk #>> '{own,rts}')::int >= 1,
+    'the return reached the buyer''s risk row');
+
+  -- Typed the way a buyer types it, matched the way an order stores it. Neither
+  -- digit string contains the other, so this only works because both sides are
+  -- reduced to national digits first.
+  perform tests.eq(
+    public.buyer_risk_lookup(i.rhea_tenant, '0' || right(v_phone, 10)) #>> '{own,rts}',
+    v_risk #>> '{own,rts}',
+    'and 09XX finds the same buyer as +639XX');
+
+  -- Nothing is blocked until a human says so.
+  perform tests.ok(not (v_risk #>> '{own,blockCod}')::boolean,
+    'a bad score does not block anyone by itself');
+  perform tests.ok(
+    ((public.buyer_risk_set_flag(i.rhea_tenant, v_phone, true)) #>> '{own,blockCod}')::boolean,
+    'blocking is an explicit act');
+
+  -- The shared pool is off by default and stays quiet.
+  perform tests.ok((v_risk -> 'shared') is null or v_risk -> 'shared' = 'null'::jsonb,
+    'and the cross-tenant signal says nothing until the store opts in');
+end;
+$$;
+
+-- ---- The pool itself is nobody's to read -----------------------------------
+do $$
+begin
+  -- No policy and no grant, on purpose. The aggregate is meant to be reachable
+  -- only through `buyer_risk_lookup`, which subtracts the caller's own numbers
+  -- before returning anything.
+  perform tests.rejects($q$ select count(*) from public.buyer_risk_signals $q$,
+    'not even an owner can read the shared risk pool directly');
+  perform tests.rejects($q$ select count(*) from public.buyer_risk_contributions $q$,
+    'nor the table that maps a hash back to the stores that reported it');
+  perform tests.rejects($q$ select count(*) from public.platform_secrets $q$,
+    'nor the salt those hashes are built with');
+
+  -- And the three functions behind it are callable by nobody at all. A caller
+  -- with `buyer_risk_hash` could confirm whether any given phone number is in
+  -- the pool, one number at a time — the exact property hashing exists to stop.
+  perform tests.rejects($q$ select public.buyer_risk_hash('9171234567') $q$,
+    'and the hash function is not callable, so the pool cannot be probed');
+  perform tests.rejects(
+    format($q$ select public.buyer_risk_refresh(%L, '+639171234567') $q$,
+      (select rhea_tenant from tests.ids)),
+    'nor is the function that derives a risk row from another tenant''s orders');
+end;
+$$;
+
+-- ---- A buyer has no business here ------------------------------------------
+select tests.logout();
+set local role anon;
+do $$
+declare
+  i record;
+  p record;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p9;
+
+  perform tests.rejects($q$ select count(*) from public.cod_remittances $q$,
+    'anon has no grant on remittances');
+  perform tests.rejects($q$ select count(*) from public.cod_remittance_lines $q$,
+    'nor on their lines');
+  perform tests.rejects($q$ select count(*) from public.order_rts $q$,
+    'nor on returns');
+  perform tests.rejects($q$ select count(*) from public.buyer_risk_flags $q$,
+    'nor on what a store thinks of its buyers');
+
+  perform tests.rejects(
+    format($q$ select public.cod_reconciliation(%L) $q$, i.rhea_tenant),
+    'and cannot read a store''s COD position');
+  perform tests.rejects(
+    format($q$ select public.cod_import_statement(%L, 'jnt', '[]'::jsonb) $q$, i.rhea_tenant),
+    'nor import a statement that would mark orders paid');
+  perform tests.rejects(
+    format($q$ select public.record_rts(%L, 'other') $q$, p.rhea_order),
+    'nor send a parcel back and help themselves to the stock');
+  perform tests.rejects(
+    format($q$ select public.buyer_risk_set_flag(%L, '+639171234567', true) $q$, i.rhea_tenant),
+    'nor blacklist a rival''s customers');
+end;
+$$;
+
+reset role;
+set local role authenticated;
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+
+-- ---------------------------------------------------------------------------
 -- my_tenants()
 -- ---------------------------------------------------------------------------
 \echo ''
@@ -3135,8 +3495,8 @@ declare v_passed int := coalesce(nullif(current_setting('tests.passed', true), '
 begin
   raise notice '';
   raise notice '=== % assertions passed', v_passed;
-  if v_passed < 380 then
-    raise exception 'Expected at least 380 assertions, only % ran — did a section get skipped?', v_passed
+  if v_passed < 425 then
+    raise exception 'Expected at least 425 assertions, only % ran — did a section get skipped?', v_passed
       using errcode = 'triggered_action_exception';
   end if;
 end;

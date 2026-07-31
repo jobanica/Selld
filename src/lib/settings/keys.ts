@@ -26,6 +26,8 @@ export type SettingKey =
   | 'orders.auto_confirm'
   | 'catalog.presets'
   | 'shipping.flat_centavos'
+  | 'risk.contribute_signal'
+  | 'risk.use_shared_signal'
 
 export interface TenantSettings {
   /** Which wizard step to resume at, 1-5. */
@@ -53,6 +55,23 @@ export interface TenantSettings {
    * one that charges a stated flat rate.
    */
   'shipping.flat_centavos': Centavos
+  /**
+   * Whether this store adds its buyers' delivery history to the cross-tenant
+   * risk pool, hashed and without a tenant id attached.
+   *
+   * Off by default and only ever turned on deliberately. However anonymised the
+   * pool is, contributing a customer's history to it is a decision a seller makes
+   * knowingly or not at all.
+   */
+  'risk.contribute_signal': boolean
+  /**
+   * Whether the checkout and the returns screen show what *other* stores have
+   * seen about a phone number.
+   *
+   * Separate from contributing, and gated on it: reading without contributing is
+   * a free ride on other sellers' data, so `buyer_risk_lookup` requires both.
+   */
+  'risk.use_shared_signal': boolean
 }
 
 export const SETTING_DEFAULTS: TenantSettings = {
@@ -67,6 +86,8 @@ export const SETTING_DEFAULTS: TenantSettings = {
   'catalog.presets': [],
   // ₱80 is the going rate for a Metro Manila small-parcel COD delivery.
   'shipping.flat_centavos': centavos(8000),
+  'risk.contribute_signal': false,
+  'risk.use_shared_signal': false,
 }
 
 type Parser<K extends SettingKey> = (raw: unknown) => TenantSettings[K] | undefined
@@ -98,6 +119,8 @@ const PARSERS: { [K in SettingKey]: Parser<K> } = {
   'orders.number_prefix': (raw) =>
     typeof raw === 'string' && raw.length <= 8 ? raw : undefined,
   'orders.auto_confirm': (raw) => (typeof raw === 'boolean' ? raw : undefined),
+  'risk.contribute_signal': (raw) => (typeof raw === 'boolean' ? raw : undefined),
+  'risk.use_shared_signal': (raw) => (typeof raw === 'boolean' ? raw : undefined),
   'catalog.presets': (raw) =>
     Array.isArray(raw) && raw.every((item) => typeof item === 'string')
       ? (raw as string[])

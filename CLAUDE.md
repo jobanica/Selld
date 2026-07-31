@@ -5,8 +5,7 @@ Build one phase per session, in order. The full roadmap is in
 [`docs/build-spec.md`](docs/build-spec.md); who we're building for is in
 [`docs/avatar.md`](docs/avatar.md).
 
-**Current state: phase 11 complete.** Next up is phase 12 (COD reconciliation and
-RTS control).
+**Current state: phase 12 complete.** Next up is phase 13 (live selling capture).
 
 ---
 
@@ -198,6 +197,16 @@ What follows from that:
   it the way `apply_reservation` is split: an unchecked `_raw` primitive granted to
   nobody, and a checked wrapper that is the only thing granted out.
 
+- **Phase 12 adds a table that deliberately spans tenants, and it is the most
+  dangerous one in the schema.** `buyer_risk_signals` pools delivery history across
+  stores, so: the phone is stored as a salted hash and never in the clear; there is
+  no tenant column on the aggregate and no way back to one; contributing and reading
+  are *separate* opt-ins and reading requires contributing; the table has RLS on
+  with **no policy at all** and no grants, so the only reader is a definer; and
+  `buyer_risk_lookup` subtracts the caller's own numbers before returning anything,
+  or a seller would read their own two bad experiences back as four. A CI step
+  asserts every one of those.
+
 **`cart_pricing()` is the only place money is computed.** The quote the buyer sees
 and the order that gets written both go through it, so they cannot disagree.
 `cart_items.unit_price_centavos` is a display snapshot and is never charged —
@@ -211,7 +220,7 @@ order still charges the live price. That assertion was verified to fail when
 src/
   App.tsx       ← picks a surface by hostname, lazy-loads it
   core/         ← extraction boundary; becomes @yourorg/ph-commerce-core
-    couriers/ payments/ sms/ marketplaces/ tenancy/ integration/
+    cod/ couriers/ payments/ sms/ marketplaces/ tenancy/ integration/
   app/          ← dashboard (authenticated seller surface)
   storefront/   ← public buyer surface, own perf budget
   features/     ← feature slices; may import from core and lib
@@ -407,6 +416,26 @@ one new file plus one registry line, and zero lines of order logic.
 - **`pnpm db:types` used to drop the file's hand-written header**, which CI's drift
   check strips with `tail -n +10`. Running it therefore broke the check it exists to
   satisfy. The script now re-emits the header.
+- **A regex alternation for an XML element must try the self-closing form first.**
+  `<row>…</row>|<row/>` lets an empty `<row r="2"/>` match the *first* branch from
+  its own position all the way to the next row's `</row>`, swallowing a real row.
+  In a courier statement that is a parcel that silently disappears — no error, one
+  payment short. See `ELEMENTS` in `src/core/cod/xlsx.ts`.
+- **Money in an uploaded file: the decimal separator is whichever of `.` and `,`
+  comes *last*.** `1,450.00` and `1.450,00` are both ₱1,450, and any other rule
+  reads one of them as ₱1.50. Parse to centavos with integer arithmetic
+  (`parseMoneyCentavos`), never `parseFloat` — hard rule 2 applies to files a
+  courier wrote, not just to our own forms.
+- **A plpgsql `record` that was never assigned cannot even be tested for null.**
+  "The tuple structure of a not-yet-assigned record is indeterminate" — so a
+  `select ... into` inside an `if` leaves a landmine for every later reference.
+  Build the optional half as `jsonb` initialised to null instead; see
+  `buyer_risk_lookup`.
+- **`revoke ... from public` does not remove a privilege granted directly to a
+  role.** The mirror image of the trap above it: after `grant execute ... to
+  authenticated`, only `revoke ... from authenticated` takes it back. Restoring
+  after a sabotage test with the wrong one leaves the hole open and the next suite
+  run is what tells you.
 - **`now()` is the transaction timestamp, so `order by created_at` does not order
   rows written together.** The SMS credit ledger broke a `created_at` tie on
   `id desc` — a random uuid — so `sms_credit_balance` returned the pre-send balance

@@ -1,4 +1,5 @@
 import {
+  Banknote,
   BarChart3,
   Boxes,
   CreditCard,
@@ -54,6 +55,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { to: '/live', labelKey: 'liveSelling', icon: Radio, phase: 13 },
       { to: '/shipping', labelKey: 'shipping', icon: Truck, phase: 7 },
       { to: '/payments', labelKey: 'payments', icon: CreditCard, phase: 8 },
+      { to: '/cod', labelKey: 'cod', icon: Banknote, phase: 12 },
     ],
   },
   {

@@ -11,6 +11,8 @@ import { formatPHP } from '@/lib/money'
 import { formatManilaDateTime } from '@/lib/time/manila'
 import { cn } from '@/lib/utils'
 
+import { RtsDialog } from '@/features/cod/rts-dialog'
+
 import { OrderDetailSheet } from './order-detail-sheet'
 import { PackingSheet } from './packing-sheet'
 import {
@@ -54,6 +56,9 @@ export function OrdersPage() {
   const [search, setSearch] = useState('')
   const [submittedSearch, setSubmittedSearch] = useState('')
   const [selected, setSelected] = useState<Set<string>>(new Set())
+  // RTS is the one bulk action that cannot be a single UPDATE: it has to ask
+  // whether the goods came back saleable and what the return leg cost.
+  const [rtsIds, setRtsIds] = useState<string[] | null>(null)
   const [openOrderId, setOpenOrderId] = useState<string | null>(null)
   const [packingIds, setPackingIds] = useState<string[] | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -275,7 +280,9 @@ export function OrdersPage() {
             {actions.map((action) => (
               <Button
                 key={action}
-                onClick={() => move.mutate(action)}
+                onClick={() =>
+                  action === 'rts' ? setRtsIds([...selected]) : move.mutate(action)
+                }
                 disabled={move.isPending}
                 size={action === 'cancelled' ? 'default' : 'default'}
                 variant={action === 'cancelled' ? 'outline' : 'default'}
@@ -363,6 +370,17 @@ export function OrdersPage() {
 
       {packingIds !== null && (
         <PackingSheet orderIds={packingIds} onClose={() => setPackingIds(null)} />
+      )}
+
+      {rtsIds !== null && (
+        <RtsDialog
+          orderIds={rtsIds}
+          onClose={() => setRtsIds(null)}
+          onDone={async () => {
+            setSelected(new Set())
+            await invalidate()
+          }}
+        />
       )}
     </div>
   )

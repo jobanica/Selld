@@ -43,6 +43,138 @@ export type Database = {
   }
   public: {
     Tables: {
+      buyer_risk_contributions: {
+        Row: {
+          delivered_count: number
+          orders_count: number
+          phone_hash: string
+          rts_count: number
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          delivered_count?: number
+          orders_count?: number
+          phone_hash: string
+          rts_count?: number
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          delivered_count?: number
+          orders_count?: number
+          phone_hash?: string
+          rts_count?: number
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "buyer_risk_contributions_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "buyer_risk_contributions_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      buyer_risk_flags: {
+        Row: {
+          block_cod: boolean
+          delivered_count: number
+          id: string
+          last_rts_at: string | null
+          note: string | null
+          orders_count: number
+          phone_digits: string
+          rts_count: number
+          rts_rate_bps: number
+          tenant_id: string
+          trusted: boolean
+          updated_at: string
+        }
+        Insert: {
+          block_cod?: boolean
+          delivered_count?: number
+          id?: string
+          last_rts_at?: string | null
+          note?: string | null
+          orders_count?: number
+          phone_digits: string
+          rts_count?: number
+          rts_rate_bps?: number
+          tenant_id: string
+          trusted?: boolean
+          updated_at?: string
+        }
+        Update: {
+          block_cod?: boolean
+          delivered_count?: number
+          id?: string
+          last_rts_at?: string | null
+          note?: string | null
+          orders_count?: number
+          phone_digits?: string
+          rts_count?: number
+          rts_rate_bps?: number
+          tenant_id?: string
+          trusted?: boolean
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "buyer_risk_flags_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "buyer_risk_flags_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      buyer_risk_signals: {
+        Row: {
+          delivered_count: number
+          first_seen_at: string
+          orders_count: number
+          phone_hash: string
+          rts_count: number
+          tenants_seen: number
+          updated_at: string
+        }
+        Insert: {
+          delivered_count?: number
+          first_seen_at?: string
+          orders_count?: number
+          phone_hash: string
+          rts_count?: number
+          tenants_seen?: number
+          updated_at?: string
+        }
+        Update: {
+          delivered_count?: number
+          first_seen_at?: string
+          orders_count?: number
+          phone_hash?: string
+          rts_count?: number
+          tenants_seen?: number
+          updated_at?: string
+        }
+        Relationships: []
+      }
       cart_items: {
         Row: {
           cart_id: string
@@ -229,6 +361,173 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "categories"
             referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
+      cod_remittance_lines: {
+        Row: {
+          amount_centavos: number
+          created_at: string
+          fee_centavos: number
+          id: string
+          match_status: string
+          order_id: string | null
+          raw: Json | null
+          remittance_id: string
+          remitted_at: string | null
+          row_number: number
+          shipment_id: string | null
+          tenant_id: string
+          variance_centavos: number
+          waybill: string
+        }
+        Insert: {
+          amount_centavos: number
+          created_at?: string
+          fee_centavos?: number
+          id?: string
+          match_status: string
+          order_id?: string | null
+          raw?: Json | null
+          remittance_id: string
+          remitted_at?: string | null
+          row_number: number
+          shipment_id?: string | null
+          tenant_id: string
+          variance_centavos?: number
+          waybill: string
+        }
+        Update: {
+          amount_centavos?: number
+          created_at?: string
+          fee_centavos?: number
+          id?: string
+          match_status?: string
+          order_id?: string | null
+          raw?: Json | null
+          remittance_id?: string
+          remitted_at?: string | null
+          row_number?: number
+          shipment_id?: string | null
+          tenant_id?: string
+          variance_centavos?: number
+          waybill?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cod_remittance_lines_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cod_remittance_lines_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cod_remittance_lines_tenant_id_order_id_fkey"
+            columns: ["tenant_id", "order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "cod_remittance_lines_tenant_id_remittance_id_fkey"
+            columns: ["tenant_id", "remittance_id"]
+            isOneToOne: false
+            referencedRelation: "cod_remittances"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "cod_remittance_lines_tenant_id_shipment_id_fkey"
+            columns: ["tenant_id", "shipment_id"]
+            isOneToOne: false
+            referencedRelation: "shipments"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
+      cod_remittances: {
+        Row: {
+          courier: string
+          created_at: string
+          declared_total_centavos: number | null
+          filename: string | null
+          id: string
+          imported_by: string | null
+          period_end: string | null
+          period_start: string | null
+          posted_at: string | null
+          posted_by: string | null
+          reference: string | null
+          status: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          courier: string
+          created_at?: string
+          declared_total_centavos?: number | null
+          filename?: string | null
+          id?: string
+          imported_by?: string | null
+          period_end?: string | null
+          period_start?: string | null
+          posted_at?: string | null
+          posted_by?: string | null
+          reference?: string | null
+          status?: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          courier?: string
+          created_at?: string
+          declared_total_centavos?: number | null
+          filename?: string | null
+          id?: string
+          imported_by?: string | null
+          period_end?: string | null
+          period_start?: string | null
+          posted_at?: string | null
+          posted_by?: string | null
+          reference?: string | null
+          status?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "cod_remittances_imported_by_fkey"
+            columns: ["imported_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cod_remittances_posted_by_fkey"
+            columns: ["posted_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cod_remittances_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cod_remittances_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -981,6 +1280,94 @@ export type Database = {
           },
         ]
       }
+      order_rts: {
+        Row: {
+          created_at: string
+          id: string
+          location_id: string | null
+          note: string | null
+          order_id: string
+          outbound_cost_centavos: number
+          reason: string
+          recorded_by: string | null
+          restocked: boolean
+          return_cost_centavos: number
+          shipment_id: string | null
+          tenant_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          location_id?: string | null
+          note?: string | null
+          order_id: string
+          outbound_cost_centavos?: number
+          reason: string
+          recorded_by?: string | null
+          restocked?: boolean
+          return_cost_centavos?: number
+          shipment_id?: string | null
+          tenant_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          location_id?: string | null
+          note?: string | null
+          order_id?: string
+          outbound_cost_centavos?: number
+          reason?: string
+          recorded_by?: string | null
+          restocked?: boolean
+          return_cost_centavos?: number
+          shipment_id?: string | null
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "order_rts_recorded_by_fkey"
+            columns: ["recorded_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "order_rts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "order_rts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "order_rts_tenant_id_location_id_fkey"
+            columns: ["tenant_id", "location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "order_rts_tenant_id_order_id_fkey"
+            columns: ["tenant_id", "order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "order_rts_tenant_id_shipment_id_fkey"
+            columns: ["tenant_id", "shipment_id"]
+            isOneToOne: false
+            referencedRelation: "shipments"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
       order_status_history: {
         Row: {
           actor_id: string | null
@@ -1389,6 +1776,24 @@ export type Database = {
             referencedColumns: ["tenant_id", "id"]
           },
         ]
+      }
+      platform_secrets: {
+        Row: {
+          created_at: string
+          key: string
+          value: Json
+        }
+        Insert: {
+          created_at?: string
+          key: string
+          value: Json
+        }
+        Update: {
+          created_at?: string
+          key?: string
+          value?: Json
+        }
+        Relationships: []
       }
       product_images: {
         Row: {
@@ -3394,6 +3799,35 @@ export type Database = {
         Args: { p_on_hand: number; p_reserved: number }
         Returns: number
       }
+      buyer_risk_contribute: {
+        Args: {
+          p_delivered: number
+          p_digits: string
+          p_orders: number
+          p_rts: number
+          p_tenant_id: string
+        }
+        Returns: undefined
+      }
+      buyer_risk_hash: { Args: { p_digits: string }; Returns: string }
+      buyer_risk_lookup: {
+        Args: { p_phone: string; p_tenant_id: string }
+        Returns: Json
+      }
+      buyer_risk_refresh: {
+        Args: { p_phone: string; p_tenant_id: string }
+        Returns: Json
+      }
+      buyer_risk_set_flag: {
+        Args: {
+          p_block_cod?: boolean
+          p_note?: string
+          p_phone: string
+          p_tenant_id: string
+          p_trusted?: boolean
+        }
+        Returns: Json
+      }
       cart_add_item: {
         Args: { p_qty?: number; p_token: string; p_variant_id: string }
         Returns: Json
@@ -3446,6 +3880,38 @@ export type Database = {
           p_payment_method?: string
           p_token: string
         }
+        Returns: Json
+      }
+      cod_discard_remittance: {
+        Args: { p_remittance_id: string }
+        Returns: Json
+      }
+      cod_import_statement: {
+        Args: {
+          p_courier: string
+          p_declared_total?: number
+          p_filename?: string
+          p_lines: Json
+          p_reference?: string
+          p_tenant_id: string
+        }
+        Returns: Json
+      }
+      cod_post_remittance: { Args: { p_remittance_id: string }; Returns: Json }
+      cod_reconciliation: {
+        Args: { p_days?: number; p_tenant_id: string }
+        Returns: Json
+      }
+      cod_remittance_lines: {
+        Args: {
+          p_limit?: number
+          p_only_problems?: boolean
+          p_remittance_id: string
+        }
+        Returns: Json
+      }
+      cod_remittance_summary: {
+        Args: { p_remittance_id: string }
         Returns: Json
       }
       courier_booking_batch: {
@@ -3666,6 +4132,17 @@ export type Database = {
         }
         Returns: Json
       }
+      record_rts: {
+        Args: {
+          p_location_id?: string
+          p_note?: string
+          p_order_id: string
+          p_reason: string
+          p_restock?: boolean
+          p_return_cost?: number
+        }
+        Returns: Json
+      }
       record_shipment: {
         Args: {
           p_cod?: number
@@ -3745,6 +4222,10 @@ export type Database = {
           p_tenant_id: string
         }
         Returns: string
+      }
+      rts_report: {
+        Args: { p_days?: number; p_tenant_id: string }
+        Returns: Json
       }
       seed_categories_from_presets: {
         Args: { p_names: string[]; p_tenant_id: string }
@@ -3872,6 +4353,10 @@ export type Database = {
       tenant_role_rank: {
         Args: { role: Database["public"]["Enums"]["tenant_role"] }
         Returns: number
+      }
+      update_rts_cost: {
+        Args: { p_return_cost: number; p_rts_id: string }
+        Returns: Json
       }
     }
     Enums: {

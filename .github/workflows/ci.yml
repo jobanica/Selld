@@ -287,7 +287,11 @@ jobs:
                 'set_courier_credentials', 'courier_credentials',
                 'record_shipment', 'record_booking_failure',
                 'record_shipment_event', 'record_tracking_sms', 'sms_credit_move',
-                'sms_render_for_order', 'shipments_to_poll', 'sms_credit_balance_raw'
+                'sms_render_for_order', 'shipments_to_poll', 'sms_credit_balance_raw',
+                'cod_import_statement', 'cod_post_remittance', 'cod_discard_remittance',
+                'cod_reconciliation', 'record_rts', 'update_rts_cost',
+                'buyer_risk_set_flag', 'buyer_risk_lookup',
+                'buyer_risk_hash', 'buyer_risk_contribute', 'buyer_risk_refresh'
               ]
               loop
                 if exists (
@@ -356,6 +360,57 @@ jobs:
                   array_to_string(blocked, ', ');
               end if;
               raise notice 'service role can execute what it needs OK';
+            end
+            \$\$;
+          "
+
+      # The cross-tenant risk pool is the first table in the schema that spans
+      # tenants on purpose, which makes it the one worth checking mechanically.
+      # Three properties, none of which a policy alone would give you:
+      #   - the aggregate and the hash->tenant map are readable by no role at all
+      #   - the salt those hashes are built with is not readable either
+      #   - the hash function is not callable, so nobody can ask "is this number
+      #     in the pool?" one number at a time
+      - name: The shared buyer-risk pool stays pseudonymous
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h 127.0.0.1 -p 54322 -U postgres -v ON_ERROR_STOP=1 -c "
+            do \$\$
+            declare
+              t text;
+              r text;
+              leaked text[] := '{}';
+            begin
+              foreach t in array array[
+                'buyer_risk_signals', 'buyer_risk_contributions', 'platform_secrets'
+              ] loop
+                if not (select relrowsecurity and relforcerowsecurity
+                        from pg_class where oid = ('public.' || t)::regclass) then
+                  leaked := leaked || (t || ': RLS not forced');
+                end if;
+                if exists (select 1 from pg_policies
+                            where schemaname = 'public' and tablename = t) then
+                  leaked := leaked || (t || ': has a policy, so something can read it');
+                end if;
+                foreach r in array array['anon', 'authenticated', 'service_role'] loop
+                  if has_table_privilege(r, ('public.' || t)::regclass, 'SELECT') then
+                    leaked := leaked || (t || ': readable by ' || r);
+                  end if;
+                end loop;
+              end loop;
+
+              foreach r in array array['anon', 'authenticated'] loop
+                if has_function_privilege(r, 'public.buyer_risk_hash(text)', 'EXECUTE') then
+                  leaked := leaked || ('buyer_risk_hash callable by ' || r);
+                end if;
+              end loop;
+
+              if array_length(leaked, 1) > 0 then
+                raise exception 'The shared risk pool is not pseudonymous: %',
+                  array_to_string(leaked, '; ');
+              end if;
+              raise notice 'shared buyer-risk pool is unreadable and unprobeable OK';
             end
             \$\$;
           "
