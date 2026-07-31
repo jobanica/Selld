@@ -40,7 +40,7 @@ export function CheckoutPage({
   data: Extract<CartPageData, { route: 'checkout' }>
 }) {
   const { t } = useTranslation()
-  const { quote, contact, address, options, error } = data
+  const { quote, contact, address, options, error, onlineMethods } = data
 
   if (quote === null) return null
 
@@ -202,26 +202,26 @@ export function CheckoutPage({
               {t('checkout.paymentHeading')}
             </h2>
             {/*
-              COD only, and said plainly. Online payment is phase 8 — offering a
-              GCash button now would create orders that cannot be paid, and the
-              server refuses any method other than `cod` regardless of what the
-              form posts.
+              What is offered here is what the store can actually take. `onlineMethods`
+              comes from whether the seller has a working, enabled payment account —
+              not from a settings flag — and `checkout_place_order` re-checks it. A
+              button the server would refuse is the phase-6 mistake in a new costume.
+
+              A COD-blocked item removes COD but leaves the online methods, which is
+              the point of blocking it: high-value or fragile goods can still be sold,
+              just not on delivery.
             */}
-            {/*
-              A COD-blocked item makes this store's only live payment method
-              unavailable, so say that rather than showing a control that will be
-              refused. `checkout_place_order` refuses it regardless of what the form
-              posts — this is the explanation, not the enforcement.
-            */}
-            {quote.codAllowed === false ? (
+            {quote.codAllowed === false && onlineMethods.length === 0 && (
               <p
                 role="alert"
                 className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm"
               >
                 {t('checkout.codBlockedItem')}
               </p>
-            ) : (
-              <label className="flex items-start gap-3 rounded-lg border border-primary bg-primary/5 p-3">
+            )}
+
+            {quote.codAllowed !== false && (
+              <label className="flex min-h-11 items-start gap-3 rounded-lg border p-3 has-[:checked]:border-primary has-[:checked]:bg-primary/5">
                 <input
                   type="radio"
                   name="paymentMethod"
@@ -235,7 +235,35 @@ export function CheckoutPage({
                 </span>
               </label>
             )}
-            <p className="text-xs text-muted-foreground">{t('checkout.onlineSoon')}</p>
+
+            {onlineMethods.map((method, index) => (
+              <label
+                key={method}
+                className="flex min-h-11 items-start gap-3 rounded-lg border p-3 has-[:checked]:border-primary has-[:checked]:bg-primary/5"
+              >
+                <input
+                  type="radio"
+                  name="paymentMethod"
+                  value={method}
+                  // When COD is blocked the first online method is the default,
+                  // so the buyer is never looking at a form with nothing selected.
+                  defaultChecked={quote.codAllowed === false && index === 0}
+                  className="mt-0.5 size-4 accent-[var(--primary)]"
+                />
+                <span className="text-sm">
+                  <span className="block font-medium">
+                    {t(`checkout.method.${method}` as 'checkout.method.gcash')}
+                  </span>
+                  <span className="block text-muted-foreground">
+                    {t('checkout.onlineHint')}
+                  </span>
+                </span>
+              </label>
+            ))}
+
+            {onlineMethods.length === 0 && (
+              <p className="text-xs text-muted-foreground">{t('checkout.onlineSoon')}</p>
+            )}
           </section>
 
           {/* 5 — Review */}

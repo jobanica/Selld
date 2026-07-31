@@ -12,9 +12,9 @@ phase's scope and done-when criteria.
 | 4 | Inventory | ✅ Complete |
 | 5 | Storefront | ✅ Complete |
 | 6 | Cart & guest checkout | ✅ Complete |
-| 7 | Shipping configuration | ⬜ Next |
-| 8 | Payments | ⬜ |
-| 9 | Order management dashboard | ⬜ |
+| 7 | Shipping configuration | ✅ Complete |
+| 8 | Payments | ✅ Complete |
+| 9 | Order management dashboard | ⬜ Next |
 | 10 | Courier integration | ⬜ |
 | 11 | Tracking & buyer notifications | ⬜ |
 | 12 | COD reconciliation & RTS control | ⬜ |
@@ -775,4 +775,113 @@ list any more."
 
 **Gate:** `pnpm verify` (349 tests), `pnpm db:test` (266 assertions),
 `pnpm db:test:concurrency` (23 assertions). All 12 migrations apply from scratch on
+PG 17.6.
+
+---
+
+## Phase 8 — Payments
+
+**Done when:** a GCash payment moves the order to `paid` via webhook with no
+polling, and replaying the same webhook twice changes nothing.
+
+**Measured** by driving the real storefront and the real webhook endpoint over HTTP
+against a real database:
+
+```
+1. Buyer places a GCash order            POST /checkout -> 303, order 0001, unpaid
+2. Payment opened                        awaiting_action, ref inv_live_9001
+3. Rejections come first                 no token 401 · wrong token 401
+                                         unknown slug 404 · GET 405
+                                         order after rejections: unpaid
+4. Verified webhook                      {"outcome":"applied", ...}  order: paid
+5. Replayed twice                        {"outcome":"duplicate","applied":false}
+   before (events|history|payments|paid_at|status): 1|2|2|04:12:33+00|paid
+   after  (events|history|payments|paid_at|status): 1|2|2|04:12:33+00|paid
+```
+
+Nothing polls. The order reaches `paid` on the delivery itself, and two replays
+changed no row, no timestamp and no timeline entry.
+
+### What shipped
+
+- **`webhook_events`** with `unique (provider, external_id)`. `record_payment_event`
+  inserts there *first* and returns early on conflict, so a duplicate cannot reach
+  the order-mutating half of the function at all. Replay safety is a constraint, not
+  a code path that every future edit has to remember.
+- **`payments`** — one row per *attempt*, not per order. An order legitimately
+  accumulates several (an expired GCash invoice, a failed one, then a bank transfer
+  recorded by hand), and that history is what a seller needs when a buyer says "I
+  already paid". `orders.payment_status` is *derived* from them by
+  `sync_order_payment_status`, never assigned.
+- **`payment_accounts`** with per-tenant Xendit credentials — the money must land in
+  the seller's bank, not ours. `secret_key` and `callback_token` appear in no GRANT,
+  so no client role can read them; sellers see `payment_accounts_safe`, which reports
+  whether a key is set and its last four characters.
+- **Webhook routing by opaque slug.** Xendit's callback token is a static per-account
+  secret, so a delivery must be attributed *before* it can be verified. A tenant id in
+  the URL would be printed on a settings screen and in every support screenshot; a
+  32-byte random slug identifies the account and names nothing.
+- **`XenditProvider`** implementing the phase-0 `PaymentProvider` interface: invoices
+  covering GCash, Maya, GrabPay, QRPH and cards behind one hosted page, which also
+  keeps card details out of this codebase entirely (PCI scope stays SAQ-A). Every
+  call carries a deterministic idempotency key, retries with backoff, and is logged
+  to `integration_logs` — hard rule 7, verified against a real 401 from `api.xendit.co`.
+- **Online checkout**, offered only when the store has a working enabled account.
+  Phase 6's blanket "COD only" refusal became a real capability check.
+- **COD as a lifecycle**, not the absence of payment: `confirmed` and `unpaid` from
+  placement until `record_cod_remittance` — which is exactly the state phase 12's
+  reconciliation reads.
+- **Manual payments** (bank transfer, GCash screenshot) with proof in a **private**
+  Storage bucket. A GCash receipt carries a buyer's name, amount and reference
+  number; the public bucket would make each one readable by URL alone.
+- **Refunds**, full and partial, in two steps — recorded then settled — so a refund
+  that fails at the provider is visible as `pending` rather than lost.
+
+### The amount is checked, never assumed
+
+The provider reports what the buyer actually sent. A one-centavo payment against a
+₱1,600 order lands on `partial`, not `paid`. Trusting a provider-supplied amount to
+mean "settled" is the same class of mistake as trusting a client-supplied price,
+which hard rule 6 already forbids on the way out. Asserted in both suites.
+
+### Notable findings
+
+| Symptom | Cause |
+|---|---|
+| `record_payment_event` was callable by `anon` | Postgres grants `EXECUTE` on every new function to **PUBLIC**. `revoke ... from anon, authenticated` does not remove a privilege held *through* PUBLIC — it succeeds, changes nothing, and reports no error. Anyone who could observe an invoice id could have marked any order paid. Fixed with `revoke ... from public`; a CI step now asserts the ACL for every money-moving function, so a *new* one cannot repeat it. |
+| `payment_accounts_safe` returned "permission denied" for everyone, including the account's owner | A `security_invoker` view cannot read a column the caller has no grant on — and the view's whole job is to derive facts from exactly those columns. Now owner-run with `is_tenant_member()` in the `where` clause, the same pattern as the `storefront_*` views. |
+| A freshly created store showed COD-only despite a connected account | The `payments.methods` default was backfilled at migration time but not added to `seed_tenant_defaults`, so every store created *afterwards* had no row. |
+| The zone/payment `select` list degraded every field to an error type | PostgREST infers the row shape from the select string as a *literal* type, and `'a, ' + 'b'` widens it to `string`. |
+| `pnpm db:types` broke the CI drift check it exists to satisfy | The script overwrote the file's hand-written header, which CI strips with `tail -n +10`. It now re-emits it. |
+
+### Deliberately deferred
+
+- **Manual payment, COD remittance and refund UI.** All three act on one order, and
+  there is no order screen until phase 9. The functions, the RLS, the private bucket
+  and a typed API module (`src/features/payments/payments-api.ts`) are finished and
+  covered by the suite; only the screen is missing, and it belongs on the order
+  detail view. Said plainly on the payments page rather than hidden.
+- **A real Xendit sandbox call in CI.** The provider is unit-tested against payload
+  shapes taken from Xendit's documentation, and the outbound path was exercised
+  end-to-end against `api.xendit.co` (a 401 on a deliberately fake key, correctly
+  classified `auth` and *not* retried). CI must not depend on a third party's
+  sandbox being up.
+- **Xendit Payment Requests / Payment Sessions.** Invoices are the right first
+  integration: one hosted page, every PH channel, no card data in scope.
+- **Payout and settlement reconciliation** — phase 12.
+
+### Still needed outside the repo
+
+- Each seller sets their own Xendit secret key and callback token on the payments
+  screen, and pastes their webhook URL into Xendit → Settings → Webhooks (Invoices
+  events). Nothing works until both halves are done, and the screen says so.
+- The three OTP email templates must still be set in the Supabase **cloud**
+  dashboard (Authentication → Emails); `config.toml` is local-only.
+- The storefront needs a Node process, not just static hosting.
+- `SUPABASE_SERVICE_ROLE_KEY` must be present in the storefront server's
+  environment. The webhook route is the only thing that uses it, and it answers 503
+  rather than pretending to work when it is absent.
+
+**Gate:** `pnpm verify` (374 tests), `pnpm db:test` (302 assertions),
+`pnpm db:test:concurrency` (23 assertions). All 13 migrations apply from scratch on
 PG 17.6.

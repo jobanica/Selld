@@ -29,7 +29,7 @@
     "db:reset": "supabase db reset",
     "db:migrate": "supabase migration up",
     "db:new": "supabase migration new",
-    "db:types": "supabase gen types typescript --local > src/lib/supabase/database.types.ts",
+    "db:types": "supabase gen types typescript --local > /tmp/selld-types.ts && printf '%s\\n' '/**' ' * Generated Supabase types — DO NOT EDIT BY HAND.' ' *' ' * Regenerate after every migration:' ' *   pnpm db:types' ' *' ' * Checked in so CI can typecheck without a running database.' ' */' '' > src/lib/supabase/database.types.ts && cat /tmp/selld-types.ts >> src/lib/supabase/database.types.ts",
     "db:test": "tsx scripts/db-test.ts",
     "db:test:concurrency": "tsx scripts/db-concurrency-test.ts",
     "psgc:build": "tsx scripts/psgc-build.ts",

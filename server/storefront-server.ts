@@ -7,7 +7,12 @@ import { brotliCompressSync, gzipSync } from 'node:zlib'
 import type { render as renderStorefront } from '../src/storefront/entry-server'
 import { resolveSurface } from '../src/lib/tenant/resolve-tenant'
 import type { CheckoutAddress, CheckoutContact } from '../src/storefront/cart-data'
-import { EMPTY_PSGC_OPTIONS, type CartPageData } from '../src/storefront/cart-data'
+import {
+  EMPTY_PSGC_OPTIONS,
+  isOnlineMethod,
+  type CartPageData,
+  type OnlineMethod,
+} from '../src/storefront/cart-data'
 import type { StorefrontPage } from '../src/storefront/storefront-root'
 import type { HomePayload, PageData, ProductPayload } from '../src/storefront/storefront-data'
 import {
@@ -23,6 +28,7 @@ import {
   type StoreRef,
 } from './cart-routes'
 import { CART_COOKIE } from './cookies'
+import { serveXenditWebhook } from './payment-webhook'
 import { readSupabaseConfig, rpc, type SupabaseConfig } from './supabase-rpc'
 
 /**
@@ -271,6 +277,12 @@ async function handle(
   const hostname = host.split(':')[0] ?? ''
   const url = new URL(request.url ?? '/', `http://${host || 'localhost'}`)
 
+  // Webhooks are answered before any surface routing. A provider posts to whatever
+  // host was configured — often the apex, which resolves to the dashboard surface —
+  // and its delivery must not depend on which store the hostname happens to name.
+  // The account is identified by the slug in the path, never by the host.
+  if (await serveXenditWebhook(request, response, url.pathname)) return
+
   // `.localhost` subdomains resolve to 127.0.0.1 in every modern browser, so
   // `rheas-finds.localhost:5174` exercises the real subdomain path in dev.
   const surface = resolveSurface(hostname, {
@@ -478,6 +490,30 @@ async function fetchStoreBranding(
   return payload?.store ?? null
 }
 
+/**
+ * Online methods this store can take right now.
+ *
+ * Failure is an empty list, not an error: a payments lookup that times out must
+ * degrade to COD rather than take down a checkout the buyer could still complete.
+ */
+async function fetchOnlineMethods(
+  supabase: SupabaseConfig,
+  store: StoreRef,
+): Promise<OnlineMethod[]> {
+  try {
+    const methods = await rpc<unknown>(supabase, 'storefront_payment_methods', {
+      p_slug: store.slug,
+      p_domain: store.domain,
+    })
+    if (!Array.isArray(methods)) return []
+    return methods.filter((method): method is OnlineMethod =>
+      typeof method === 'string' && isOnlineMethod(method),
+    )
+  } catch {
+    return []
+  }
+}
+
 function cartTokenFrom(request: IncomingMessage): string | null {
   const token = parseCookies(request)[CART_COOKIE]
   return token !== undefined && /^[0-9a-f]{64}$/.test(token) ? token : null
@@ -537,9 +573,10 @@ async function renderCheckout(
   // rendering a form that cannot be submitted.
   if (quote === null || quote.itemCount === 0) return redirectTo(response, '/cart')
 
-  const [options, branding] = await Promise.all([
+  const [options, branding, onlineMethods] = await Promise.all([
     fetchPsgcOptions(context.supabase, input.address).catch(() => EMPTY_PSGC_OPTIONS),
     fetchStoreBranding(context.supabase, input.store),
+    fetchOnlineMethods(context.supabase, input.store),
   ])
 
   return renderPage(request, response, context, input.url, {
@@ -550,6 +587,7 @@ async function renderCheckout(
     address: input.address,
     options,
     error: input.error === null ? null : { field: input.error.field as never, message: input.error.message },
+    onlineMethods,
   })
 }
 

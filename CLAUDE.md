@@ -5,7 +5,7 @@ Build one phase per session, in order. The full roadmap is in
 [`docs/build-spec.md`](docs/build-spec.md); who we're building for is in
 [`docs/avatar.md`](docs/avatar.md).
 
-**Current state: phase 7 complete.** Next up is phase 8 (payments).
+**Current state: phase 8 complete.** Next up is phase 9 (order management dashboard).
 
 ---
 
@@ -348,6 +348,23 @@ one new file plus one registry line, and zero lines of order logic.
   with the specificity tiebreak deleted. It now numbers them backwards on purpose.
   Same lesson as the phase-6 hard-rule-6 assertion: after writing a test, break the
   thing it guards and watch it fail.
+- **`revoke ... from anon, authenticated` does not lock down a function.** Postgres
+  grants `EXECUTE` on every new function to **PUBLIC**, and revoking from a specific
+  role does not remove a privilege that role holds *through* PUBLIC. The revoke
+  succeeds, changes nothing, and reports no error. `record_payment_event` — the
+  function that marks orders paid — shipped callable by `anon` this way. Always
+  `revoke all on function … from public;`. `\dp` shows the tell: `=X/postgres`, where
+  the empty grantee is PUBLIC. A CI step asserts the ACL for every money-moving
+  function so a new one cannot repeat it.
+- **A `security_invoker` view cannot read a column its caller has no grant on.**
+  `payment_accounts_safe` exists precisely to derive facts (`has_secret_key`,
+  `secret_key_last4`) from columns with no SELECT grant, so under invoker's rights it
+  failed for every caller with "permission denied for table payment_accounts". It is
+  owner-run with `is_tenant_member()` in the `where` clause instead — the same
+  pattern as the `storefront_*` views.
+- **`pnpm db:types` used to drop the file's hand-written header**, which CI's drift
+  check strips with `tail -n +10`. Running it therefore broke the check it exists to
+  satisfy. The script now re-emits the header.
 - **`pnpm db:test` does not apply migrations.** It runs the SQL suites against
   whatever is already in the database, so editing a migration and re-running the
   tests proves nothing about the edit. Sabotage a function with

@@ -8,6 +8,7 @@ import type {
   PsgcOptions,
   PsgcUnit,
 } from '../src/storefront/cart-data'
+import { isOnlineMethod } from '../src/storefront/cart-data'
 import {
   appendSetCookie,
   CART_COOKIE,
@@ -19,6 +20,7 @@ import {
   readRememberedCheckout,
 } from './cookies'
 import { notifyOrderPlaced } from './order-notifications'
+import { startOnlinePayment } from './payment-start'
 import { rpc, RpcError, type SupabaseConfig } from './supabase-rpc'
 
 /**
@@ -58,6 +60,24 @@ export async function readFormBody(request: IncomingMessage): Promise<URLSearchP
   }
 
   return new URLSearchParams(Buffer.concat(chunks).toString('utf8'))
+}
+
+/**
+ * The absolute origin of this request, for provider return URLs.
+ *
+ * Built from the forwarded proto and host rather than a configured base URL,
+ * because a store can be reached on `{slug}.selld.ph` or on its own custom domain
+ * and the buyer must come back to the one they left from. Same reasoning as
+ * `isSecureRequest` — deriving from the request is what makes both work behind a
+ * proxy and in local development without a second code path.
+ */
+function requestOrigin(request: IncomingMessage): string {
+  const forwardedProto = request.headers['x-forwarded-proto']
+  const proto =
+    (Array.isArray(forwardedProto) ? forwardedProto[0] : forwardedProto)?.split(',')[0]?.trim() ??
+    (isSecureRequest(request) ? 'https' : 'http')
+  const host = request.headers.host ?? 'localhost'
+  return `${proto}://${host}`
 }
 
 function redirect(response: ServerResponse, location: string, cookies: string[] = []): void {
@@ -286,6 +306,13 @@ export async function handleCheckoutPost(
   // crafted form could otherwise write "Barangay Anything" onto a real code.
   const named = await resolveAddressNames(supabase, address)
 
+  // The method the buyer chose, validated against the closed set rather than
+  // forwarded. `checkout_place_order` re-checks it and refuses an online method
+  // when the store has no enabled account, so this is a narrowing, not the
+  // enforcement.
+  const posted = (body.get('paymentMethod') ?? 'cod').trim()
+  const paymentMethod = posted === 'cod' || isOnlineMethod(posted) ? posted : 'cod'
+
   let receipt: OrderReceipt
   try {
     receipt = await rpc<OrderReceipt>(supabase, 'checkout_place_order', {
@@ -293,7 +320,7 @@ export async function handleCheckoutPost(
       p_contact_name: contact.name,
       p_contact_phone: normalisePhPhone(contact.phone),
       p_address: named,
-      p_payment_method: 'cod',
+      p_payment_method: paymentMethod,
       p_contact_email: contact.email === '' ? null : contact.email,
       p_notes: contact.notes === '' ? null : contact.notes,
     })
@@ -302,6 +329,35 @@ export async function handleCheckoutPost(
       return { kind: 'render', contact, address, error: describeCheckoutError(error) }
     }
     throw error
+  }
+
+  /**
+   * Online payment: open the charge and hand the buyer to the provider.
+   *
+   * The order already exists and stock is already reserved, which is the right way
+   * round — reserving only after payment would let two buyers pay for the last
+   * unit. If the provider call fails, `startOnlinePayment` returns null and the
+   * buyer still lands on their confirmation page with an unpaid order they can
+   * retry, rather than losing the order to a bad minute at Xendit.
+   */
+  if (paymentMethod !== 'cod') {
+    const started = await startOnlinePayment({
+      supabase,
+      cartToken: token,
+      orderId: receipt.id,
+      method: paymentMethod,
+      origin: requestOrigin(request),
+    })
+
+    const cookies = appendSetCookie(
+      undefined,
+      checkoutCookie({ ...contact, ...named }, isSecureRequest(request)),
+    )
+    // No confirmation SMS yet: an online order is not confirmed until it is paid,
+    // and texting "we got your order" before the buyer has paid trains them to
+    // ignore the one that says it went through.
+    redirect(response, started?.checkoutUrl ?? '/order/confirmed', cookies)
+    return { kind: 'redirect' }
   }
 
   // Confirmation SMS. Awaited rather than fired and forgotten, because on a

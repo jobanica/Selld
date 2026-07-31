@@ -147,6 +147,28 @@ export interface CheckoutFieldError {
  * catalog query, so there is no payload to take branding from — and an unbranded
  * cart reads as having left the shop.
  */
+/**
+ * Online methods this store can actually take right now.
+ *
+ * Empty when the seller has not connected a payment account, and the checkout page
+ * renders COD alone in that case. Deliberately derived from the store's live
+ * capability rather than from a settings flag: offering a GCash button that the
+ * server will refuse is the phase-6 mistake in a new costume.
+ */
+export type OnlineMethod = 'gcash' | 'maya' | 'grabpay' | 'qrph' | 'card'
+
+export const ONLINE_METHODS: readonly OnlineMethod[] = [
+  'gcash',
+  'maya',
+  'grabpay',
+  'qrph',
+  'card',
+]
+
+export function isOnlineMethod(value: string): value is OnlineMethod {
+  return (ONLINE_METHODS as readonly string[]).includes(value)
+}
+
 export type CartPageData =
   | { route: 'cart'; store: Store | null; quote: CartQuote | null }
   | {
@@ -158,6 +180,8 @@ export type CartPageData =
       /** PSGC options for whatever level the buyer has reached. */
       options: PsgcOptions
       error: CheckoutFieldError | null
+      /** Online methods offered; empty means COD only. */
+      onlineMethods: OnlineMethod[]
     }
   | { route: 'order-confirmed'; store: Store | null; receipt: OrderReceipt }
 

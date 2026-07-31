@@ -1,6 +1,7 @@
 import {
   BarChart3,
   Boxes,
+  CreditCard,
   LayoutDashboard,
   MessageCircle,
   Package,
@@ -52,6 +53,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { to: '/inventory', labelKey: 'inventory', icon: Boxes, phase: 4 },
       { to: '/live', labelKey: 'liveSelling', icon: Radio, phase: 13 },
       { to: '/shipping', labelKey: 'shipping', icon: Truck, phase: 7 },
+      { to: '/payments', labelKey: 'payments', icon: CreditCard, phase: 8 },
     ],
   },
   {

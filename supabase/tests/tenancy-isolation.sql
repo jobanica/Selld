@@ -2117,6 +2117,304 @@ set local role authenticated;
 select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
 
 -- ---------------------------------------------------------------------------
+-- Phase 8: payments, credentials and the webhook boundary
+-- ---------------------------------------------------------------------------
+-- Three things are defended here, in descending order of how badly they end.
+--
+-- 1. **Credentials.** `payment_accounts.secret_key` and `.callback_token` are the
+--    keys to a seller's money. RLS is row-level and cannot withhold a column, so
+--    the column list on the GRANT is the whole control — and that is exactly the
+--    kind of thing a later `grant select on all tables` undoes silently.
+--
+-- 2. **Who may mark an order paid.** `record_payment_event` is service-role only.
+--    Reachable by `authenticated` it would let any seller settle their own orders;
+--    reachable by `anon` it would let anyone settle anyone's.
+--
+-- 3. **Replay.** The phase done-when says replaying a webhook changes nothing. It is
+--    asserted here as a row count, because `unique (provider, external_id)` is what
+--    makes it true and an assertion on the returned outcome string would still pass
+--    with the constraint dropped.
+\echo ''
+\echo '=== Phase 8: payments'
+
+reset role;
+
+do $$
+declare
+  i record;
+  v_order uuid;
+  v_payment uuid;
+begin
+  select * into i from tests.ids;
+
+  insert into public.payment_accounts
+    (tenant_id, provider, secret_key, callback_token, is_enabled, connected_at)
+  values (i.rhea_tenant, 'xendit', 'xnd_secret_RHEA', 'CB_TOKEN_RHEA', true, now());
+  insert into public.payment_accounts
+    (tenant_id, provider, secret_key, callback_token, is_enabled, connected_at)
+  values (i.marlon_tenant, 'xendit', 'xnd_secret_MARLON', 'CB_TOKEN_MARLON', true, now());
+
+  -- An online payment against the order phase 6 already created for Rhea.
+  select id into v_order from public.orders where tenant_id = i.rhea_tenant limit 1;
+
+  insert into public.payments
+    (tenant_id, order_id, provider, method, status, amount_centavos, provider_ref)
+  values (i.rhea_tenant, v_order, 'xendit', 'gcash', 'awaiting_action',
+          (select grand_total_centavos from public.orders where id = v_order), 'inv_test_p8')
+  returning id into v_payment;
+
+  perform tests.pass('phase 8 fixture: two connected accounts and one open payment');
+end;
+$$;
+
+-- ---- Credentials are not readable, by anyone -------------------------------
+set local role authenticated;
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+
+  -- Her own key. Not a cross-tenant test — the point is that *nobody* can read it,
+  -- including the person it belongs to. A seller who can read their own callback
+  -- token can forge webhooks against their own store, and COD reconciliation and
+  -- refunds both run off those statuses.
+  perform tests.rejects($q$ select secret_key from public.payment_accounts limit 1 $q$,
+    'a seller cannot read their own secret key');
+  perform tests.rejects($q$ select callback_token from public.payment_accounts limit 1 $q$,
+    'nor their own callback token');
+
+  -- The rest of the row is readable, which is what makes the settings screen work.
+  perform tests.eq((select count(*)::int from public.payment_accounts), 1,
+    'but the account row itself is visible');
+  perform tests.ok(
+    (select length(webhook_slug) from public.payment_accounts) = 64,
+    'including the webhook slug, which is routing rather than a secret');
+
+  -- And the safe view reports state without ever returning a key.
+  perform tests.ok((select has_secret_key from public.payment_accounts_safe),
+    'payment_accounts_safe says whether a key is set');
+  perform tests.eq((select secret_key_last4 from public.payment_accounts_safe), 'RHEA',
+    'and shows only the last four characters');
+end;
+$$;
+
+-- ---- Nothing but the service role may settle a payment ---------------------
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+
+  perform tests.rejects(
+    $q$ select public.record_payment_event('xendit','evt_x','invoice.paid','inv_test_p8','paid',
+                                           100, '{}'::jsonb) $q$,
+    'a signed-in seller cannot mark an order paid through the webhook function');
+  perform tests.rejects(
+    $q$ select public.attach_payment_charge(gen_random_uuid(), 'inv_hijack', 'https://x') $q$,
+    'nor point a payment at a provider ref of their choosing');
+  perform tests.rejects(
+    $q$ select * from public.payment_account_for_webhook('anything') $q$,
+    'nor read a callback token through the webhook lookup');
+  perform tests.rejects(
+    $q$ select * from public.payment_credentials_for_payment(gen_random_uuid()) $q$,
+    'nor read a secret key through the credentials lookup');
+  perform tests.rejects(
+    format($q$ select public.sync_order_payment_status(%L) $q$,
+      (select id from public.orders where tenant_id = i.rhea_tenant limit 1)),
+    'nor recompute an order''s payment status directly');
+end;
+$$;
+
+-- ---- Cross-tenant --------------------------------------------------------
+select tests.login('22222222-2222-2222-2222-222222222222', 'marlon@example.ph');
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+
+  perform tests.eq((select count(*)::int from public.payments
+    where tenant_id = i.rhea_tenant), 0,
+    'Marlon sees none of Rhea''s payments');
+  perform tests.eq((select count(*)::int from public.payment_accounts
+    where tenant_id = i.rhea_tenant), 0,
+    'nor that she has connected a provider at all');
+  perform tests.eq((select count(*)::int from public.payment_accounts_safe
+    where tenant_id = i.rhea_tenant), 0,
+    'nor through the safe view');
+
+  -- A payment row is only ever written by the SECURITY DEFINER functions, so there
+  -- is no insert policy at all — this raises rather than affecting zero rows.
+  perform tests.rejects(
+    format($q$ insert into public.payments
+                 (tenant_id, order_id, provider, method, status, amount_centavos)
+               values (%L, %L, 'manual', 'bank', 'paid', 1) $q$,
+      i.rhea_tenant, (select id from public.orders where tenant_id = i.rhea_tenant limit 1)),
+    'and cannot write a payment against her order');
+
+  perform tests.rejects(
+    format($q$ select public.record_manual_payment(%L, 'bank', 100000) $q$,
+      (select id from public.orders where tenant_id = i.rhea_tenant limit 1)),
+    'nor record one through the function');
+end;
+$$;
+
+-- ---- Role enforcement ------------------------------------------------------
+-- A packer marks COD remitted; only an admin gives money back.
+select tests.login('33333333-3333-3333-3333-333333333333', 'jess@example.ph');
+do $$
+declare
+  i record;
+  v_payment uuid;
+begin
+  select * into i from tests.ids;
+  select id into v_payment from public.payments where provider_ref = 'inv_test_p8';
+
+  perform tests.eq((select count(*)::int from public.payments), 1,
+    'a packer can see what has been paid');
+  perform tests.eq((select count(*)::int from public.payment_accounts), 0,
+    'but not the payment account — live-vs-test keys are not packer business');
+
+  perform tests.rejects(
+    format($q$ select public.open_refund(%L, 100, 'nope') $q$, v_payment),
+    'and cannot refund a payment');
+end;
+$$;
+
+-- ---- Replay is a no-op, asserted on the row count ---------------------------
+reset role;
+do $$
+declare
+  i record;
+  v_order   uuid;
+  v_payment uuid;
+  v_first   jsonb;
+  v_again   jsonb;
+  v_events  int;
+  v_history int;
+  v_paid_at timestamptz;
+begin
+  select * into i from tests.ids;
+  select id into v_payment from public.payments where provider_ref = 'inv_test_p8';
+  select order_id into v_order from public.payments where id = v_payment;
+
+  v_first := public.record_payment_event(
+    'xendit', 'evt_replay_1', 'invoice.paid', 'inv_test_p8', 'paid',
+    (select grand_total_centavos::bigint from public.orders where id = v_order),
+    '{"status":"PAID"}'::jsonb, 1500, now());
+
+  perform tests.eq(v_first ->> 'outcome', 'applied', 'a verified event is applied');
+  perform tests.eq((select payment_status from public.orders where id = v_order), 'paid',
+    'and the order reaches paid with no polling');
+
+  select count(*) into v_events  from public.webhook_events;
+  select count(*) into v_history from public.order_status_history where order_id = v_order;
+  select paid_at  into v_paid_at from public.payments where id = v_payment;
+
+  v_again := public.record_payment_event(
+    'xendit', 'evt_replay_1', 'invoice.paid', 'inv_test_p8', 'paid',
+    (select grand_total_centavos::bigint from public.orders where id = v_order),
+    '{"status":"PAID"}'::jsonb, 1500, now());
+
+  perform tests.eq(v_again ->> 'outcome', 'duplicate', 'a replay is recognised as a duplicate');
+  -- The row count, not the outcome string. `unique (provider, external_id)` is what
+  -- makes replay safe; asserting only on the outcome would still pass with the
+  -- constraint dropped, because a later guard happens to catch the paid-twice case.
+  perform tests.eq((select count(*)::int from public.webhook_events), v_events,
+    'and is not recorded a second time');
+  perform tests.eq(
+    (select count(*)::int from public.order_status_history where order_id = v_order), v_history,
+    'nor does it add a second timeline entry');
+  perform tests.eq((select paid_at from public.payments where id = v_payment), v_paid_at,
+    'nor move the settlement time');
+
+  -- A late "expired" after a capture must not un-pay a paid order. Providers do
+  -- send these.
+  perform public.record_payment_event(
+    'xendit', 'evt_late_expiry', 'invoice.expired', 'inv_test_p8', 'expired', 0, '{}'::jsonb);
+  perform tests.eq((select payment_status from public.orders where id = v_order), 'paid',
+    'a late expiry does not un-pay a settled order');
+end;
+$$;
+
+-- ---- A short-pay is not a paid order ---------------------------------------
+-- The provider tells us what the buyer actually sent. Believing it settles the
+-- order is the same mistake as believing a client-supplied price, which hard rule 6
+-- already forbids on the way out.
+do $$
+declare
+  i record;
+  v_order   uuid;
+  v_payment uuid;
+begin
+  select * into i from tests.ids;
+  select id into v_order from public.orders where tenant_id = i.rhea_tenant limit 1;
+
+  insert into public.payments
+    (tenant_id, order_id, provider, method, status, amount_centavos, provider_ref)
+  values (i.rhea_tenant, v_order, 'xendit', 'gcash', 'awaiting_action', 100000, 'inv_short_p8')
+  returning id into v_payment;
+
+  -- Wipe the earlier settlement so this order is unpaid again.
+  delete from public.payments where provider_ref = 'inv_test_p8';
+  perform public.sync_order_payment_status(v_order);
+
+  perform public.record_payment_event(
+    'xendit', 'evt_short_p8', 'invoice.paid', 'inv_short_p8', 'paid', 1, '{}'::jsonb);
+
+  perform tests.ok(
+    (select grand_total_centavos::bigint from public.orders where id = v_order) > 1,
+    'the order is worth more than one centavo');
+  perform tests.eq((select payment_status from public.orders where id = v_order), 'partial',
+    'a one-centavo payment leaves the order partial, never paid');
+end;
+$$;
+
+-- ---- The buyer's side ------------------------------------------------------
+-- The order id is resolved *before* becoming anon: anon has no grant on `orders`
+-- (phase 6), so building the SQL string inside the anon block would fail outside
+-- the `rejects` wrapper and abort the suite rather than assert anything.
+create table tests.p8_order as
+  select id from public.orders limit 1;
+grant select on tests.p8_order to anon, authenticated;
+
+set local role anon;
+do $$
+declare
+  i record;
+  v_order uuid;
+begin
+  select * into i from tests.ids;
+  select id into v_order from tests.p8_order;
+
+  perform tests.rejects($q$ select count(*) from public.payment_accounts $q$,
+    'anon has no grant on payment_accounts');
+  perform tests.rejects($q$ select count(*) from public.payments $q$,
+    'anon has no grant on payments');
+  perform tests.rejects($q$ select count(*) from public.payment_refunds $q$,
+    'anon has no grant on payment_refunds');
+  perform tests.rejects($q$ select count(*) from public.webhook_events $q$,
+    'anon has no grant on webhook_events');
+
+  perform tests.rejects(
+    $q$ select public.record_payment_event('xendit','evt_anon','invoice.paid','inv_test_p8',
+                                           'paid', 100, '{}'::jsonb) $q$,
+    'and above all cannot mark an order paid');
+  perform tests.rejects(
+    format($q$ select public.record_cod_remittance(%L) $q$, v_order),
+    'nor remit a COD order on the seller''s behalf');
+
+  -- What a buyer *can* do: read which methods a store offers. Names only.
+  perform tests.ok(
+    public.storefront_payment_methods('rheas-finds', null) is not null,
+    'but can ask which payment methods a storefront offers');
+end;
+$$;
+
+reset role;
+set local role authenticated;
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+
+-- ---------------------------------------------------------------------------
 -- my_tenants()
 -- ---------------------------------------------------------------------------
 \echo ''
@@ -2153,8 +2451,8 @@ declare v_passed int := coalesce(nullif(current_setting('tests.passed', true), '
 begin
   raise notice '';
   raise notice '=== % assertions passed', v_passed;
-  if v_passed < 255 then
-    raise exception 'Expected at least 255 assertions, only % ran — did a section get skipped?', v_passed
+  if v_passed < 290 then
+    raise exception 'Expected at least 290 assertions, only % ran — did a section get skipped?', v_passed
       using errcode = 'triggered_action_exception';
   end if;
 end;

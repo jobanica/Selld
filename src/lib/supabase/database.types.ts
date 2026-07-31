@@ -973,6 +973,222 @@ export type Database = {
           },
         ]
       }
+      payment_accounts: {
+        Row: {
+          callback_token: string | null
+          connected_at: string | null
+          created_at: string
+          id: string
+          is_enabled: boolean
+          is_live: boolean
+          provider: string
+          secret_key: string | null
+          tenant_id: string
+          updated_at: string
+          webhook_slug: string
+        }
+        Insert: {
+          callback_token?: string | null
+          connected_at?: string | null
+          created_at?: string
+          id?: string
+          is_enabled?: boolean
+          is_live?: boolean
+          provider: string
+          secret_key?: string | null
+          tenant_id: string
+          updated_at?: string
+          webhook_slug?: string
+        }
+        Update: {
+          callback_token?: string | null
+          connected_at?: string | null
+          created_at?: string
+          id?: string
+          is_enabled?: boolean
+          is_live?: boolean
+          provider?: string
+          secret_key?: string | null
+          tenant_id?: string
+          updated_at?: string
+          webhook_slug?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payment_accounts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_accounts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      payment_refunds: {
+        Row: {
+          actor_id: string | null
+          amount_centavos: number
+          created_at: string
+          id: string
+          payment_id: string
+          provider_ref: string | null
+          raw: Json | null
+          reason: string
+          status: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          actor_id?: string | null
+          amount_centavos: number
+          created_at?: string
+          id?: string
+          payment_id: string
+          provider_ref?: string | null
+          raw?: Json | null
+          reason: string
+          status?: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          actor_id?: string | null
+          amount_centavos?: number
+          created_at?: string
+          id?: string
+          payment_id?: string
+          provider_ref?: string | null
+          raw?: Json | null
+          reason?: string
+          status?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payment_refunds_actor_id_fkey"
+            columns: ["actor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_refunds_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_refunds_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_refunds_tenant_id_payment_id_fkey"
+            columns: ["tenant_id", "payment_id"]
+            isOneToOne: false
+            referencedRelation: "payments"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
+      payments: {
+        Row: {
+          amount_centavos: number
+          checkout_url: string | null
+          created_at: string
+          expires_at: string | null
+          failure_reason: string | null
+          fee_centavos: number | null
+          id: string
+          method: string
+          order_id: string
+          paid_at: string | null
+          proof_note: string | null
+          proof_path: string | null
+          provider: string
+          provider_ref: string | null
+          raw: Json | null
+          refunded_centavos: number
+          status: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          amount_centavos: number
+          checkout_url?: string | null
+          created_at?: string
+          expires_at?: string | null
+          failure_reason?: string | null
+          fee_centavos?: number | null
+          id?: string
+          method: string
+          order_id: string
+          paid_at?: string | null
+          proof_note?: string | null
+          proof_path?: string | null
+          provider: string
+          provider_ref?: string | null
+          raw?: Json | null
+          refunded_centavos?: number
+          status?: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          amount_centavos?: number
+          checkout_url?: string | null
+          created_at?: string
+          expires_at?: string | null
+          failure_reason?: string | null
+          fee_centavos?: number | null
+          id?: string
+          method?: string
+          order_id?: string
+          paid_at?: string | null
+          proof_note?: string | null
+          proof_path?: string | null
+          provider?: string
+          provider_ref?: string | null
+          raw?: Json | null
+          refunded_centavos?: number
+          status?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payments_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payments_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payments_tenant_id_order_id_fkey"
+            columns: ["tenant_id", "order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
       product_images: {
         Row: {
           alt: string | null
@@ -2144,6 +2360,60 @@ export type Database = {
         }
         Relationships: []
       }
+      webhook_events: {
+        Row: {
+          created_at: string
+          error_message: string | null
+          event_type: string | null
+          external_id: string
+          id: string
+          payload: Json
+          processed_at: string | null
+          provider: string
+          status: string
+          tenant_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          error_message?: string | null
+          event_type?: string | null
+          external_id: string
+          id?: string
+          payload: Json
+          processed_at?: string | null
+          provider: string
+          status?: string
+          tenant_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          error_message?: string | null
+          event_type?: string | null
+          external_id?: string
+          id?: string
+          payload?: Json
+          processed_at?: string | null
+          provider?: string
+          status?: string
+          tenant_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "webhook_events_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "webhook_events_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
     }
     Views: {
       inventory_overview: {
@@ -2207,6 +2477,63 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "storefront_variants"
             referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
+      payment_accounts_safe: {
+        Row: {
+          connected_at: string | null
+          created_at: string | null
+          has_callback_token: boolean | null
+          has_secret_key: boolean | null
+          id: string | null
+          is_enabled: boolean | null
+          is_live: boolean | null
+          provider: string | null
+          secret_key_last4: string | null
+          tenant_id: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          connected_at?: string | null
+          created_at?: string | null
+          has_callback_token?: never
+          has_secret_key?: never
+          id?: string | null
+          is_enabled?: boolean | null
+          is_live?: boolean | null
+          provider?: string | null
+          secret_key_last4?: never
+          tenant_id?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          connected_at?: string | null
+          created_at?: string | null
+          has_callback_token?: never
+          has_secret_key?: never
+          id?: string | null
+          is_enabled?: boolean | null
+          is_live?: boolean | null
+          provider?: string | null
+          secret_key_last4?: never
+          tenant_id?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "payment_accounts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "payment_accounts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
           },
         ]
       }
@@ -2517,6 +2844,17 @@ export type Database = {
         Args: { p_variant_id: string }
         Returns: undefined
       }
+      attach_payment_charge: {
+        Args: {
+          p_checkout_url: string
+          p_expires_at?: string
+          p_payment_id: string
+          p_provider_ref: string
+          p_raw?: Json
+          p_status?: string
+        }
+        Returns: undefined
+      }
       available_stock: {
         Args: { p_on_hand: number; p_reserved: number }
         Returns: number
@@ -2559,6 +2897,10 @@ export type Database = {
         Returns: Json
       }
       catalog_slugify: { Args: { p_text: string }; Returns: string }
+      checkout_online_available: {
+        Args: { p_tenant_id: string }
+        Returns: boolean
+      }
       checkout_place_order: {
         Args: {
           p_address: Json
@@ -2605,6 +2947,21 @@ export type Database = {
       is_reserved_tenant_slug: { Args: { slug: string }; Returns: boolean }
       is_tenant_member: { Args: { p_tenant_id: string }; Returns: boolean }
       is_valid_tenant_slug: { Args: { slug: string }; Returns: boolean }
+      log_integration_attempt: {
+        Args: {
+          p_attempt?: number
+          p_duration_ms?: number
+          p_error_code?: string
+          p_error_message?: string
+          p_http_status?: number
+          p_idempotency_key: string
+          p_operation: string
+          p_provider: string
+          p_status: string
+          p_tenant_id: string
+        }
+        Returns: undefined
+      }
       my_tenants: {
         Args: never
         Returns: {
@@ -2619,8 +2976,38 @@ export type Database = {
         }[]
       }
       next_order_number: { Args: { p_tenant_id: string }; Returns: string }
+      open_refund: {
+        Args: { p_amount: number; p_payment_id: string; p_reason: string }
+        Returns: Json
+      }
       order_receipt: { Args: { p_order_id: string }; Returns: Json }
       order_receipt_for_token: { Args: { p_token: string }; Returns: Json }
+      payment_account_for_webhook: {
+        Args: { p_slug: string }
+        Returns: {
+          callback_token: string
+          is_enabled: boolean
+          provider: string
+          tenant_id: string
+        }[]
+      }
+      payment_credentials_for_payment: {
+        Args: { p_payment_id: string }
+        Returns: {
+          callback_token: string
+          is_live: boolean
+          secret_key: string
+          tenant_id: string
+        }[]
+      }
+      payment_open_for_token: {
+        Args: { p_method: string; p_order_id: string; p_token: string }
+        Returns: Json
+      }
+      payment_status_for_token: {
+        Args: { p_order_id: string; p_token: string }
+        Returns: Json
+      }
       quote_shipping: {
         Args: {
           p_city_code: string
@@ -2629,6 +3016,21 @@ export type Database = {
           p_subtotal: number
           p_tenant_id: string
           p_weight_grams?: number
+        }
+        Returns: Json
+      }
+      record_cod_remittance: {
+        Args: { p_amount?: number; p_note?: string; p_order_id: string }
+        Returns: Json
+      }
+      record_manual_payment: {
+        Args: {
+          p_amount: number
+          p_method: string
+          p_note?: string
+          p_order_id: string
+          p_paid_at?: string
+          p_proof_path?: string
         }
         Returns: Json
       }
@@ -2644,6 +3046,20 @@ export type Database = {
           p_token: string
         }
         Returns: boolean
+      }
+      record_payment_event: {
+        Args: {
+          p_amount: number
+          p_event_type: string
+          p_external_id: string
+          p_fee?: number
+          p_paid_at?: string
+          p_payload: Json
+          p_provider: string
+          p_provider_ref: string
+          p_status: string
+        }
+        Returns: Json
       }
       record_stock_movement: {
         Args: {
@@ -2704,6 +3120,15 @@ export type Database = {
         }
         Returns: undefined
       }
+      settle_refund: {
+        Args: {
+          p_provider_ref?: string
+          p_raw?: Json
+          p_refund_id: string
+          p_status: string
+        }
+        Returns: Json
+      }
       ship_reservation: {
         Args: {
           p_items: Json
@@ -2724,6 +3149,10 @@ export type Database = {
           p_search?: string
           p_slug?: string
         }
+        Returns: Json
+      }
+      storefront_payment_methods: {
+        Args: { p_domain?: string; p_slug?: string }
         Returns: Json
       }
       storefront_product_cards: {
@@ -2748,6 +3177,10 @@ export type Database = {
       storefront_store_json: { Args: { p_tenant_id: string }; Returns: Json }
       storefront_tenant_id: {
         Args: { p_domain?: string; p_slug?: string }
+        Returns: string
+      }
+      sync_order_payment_status: {
+        Args: { p_note?: string; p_order_id: string }
         Returns: string
       }
       tenant_role_of: {
