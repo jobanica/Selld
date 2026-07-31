@@ -28,6 +28,21 @@ export default defineConfig(({ isSsrBuild }) => ({
     // Storefronts resolve by subdomain ({slug}.selld.ph). Allow wildcard hosts in
     // dev so `foo.localhost:5173` reaches the same server as the dashboard.
     host: true,
+    /**
+     * `/api/*` lives on the Node server, not here.
+     *
+     * In production one process serves both the dashboard shell and these routes,
+     * so the dashboard can just fetch a relative path. In dev the dashboard is on
+     * Vite and the API is on `pnpm dev:store`, so without this proxy every courier
+     * booking 404s — and only in development, which is the worst place for a
+     * difference like that to hide.
+     */
+    proxy: {
+      '/api': {
+        target: process.env.STOREFRONT_ORIGIN ?? 'http://127.0.0.1:5174',
+        changeOrigin: true,
+      },
+    },
   },
   build: {
     // Sellers are on mid-range Android phones over mobile data. The storefront

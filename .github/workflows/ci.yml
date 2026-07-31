@@ -283,7 +283,9 @@ jobs:
                 'payment_account_for_webhook', 'payment_credentials_for_payment',
                 'sync_order_payment_status', 'log_integration_attempt',
                 'orders_bulk_transition', 'orders_list', 'order_detail',
-                'orders_packing_batch', 'create_manual_order', 'add_order_note'
+                'orders_packing_batch', 'create_manual_order', 'add_order_note',
+                'set_courier_credentials', 'courier_credentials',
+                'record_shipment', 'record_booking_failure'
               ]
               loop
                 if exists (
@@ -304,6 +306,52 @@ jobs:
                   array_to_string(leaked, ', ');
               end if;
               raise notice 'money-moving functions are service-role only OK';
+            end
+            \$\$;
+          "
+
+      # The other half of the same lesson. `revoke ... from public` is what actually
+      # locks a function down — and it revokes from `service_role` too, because in
+      # Supabase that role has BYPASSRLS (which bypasses *policies*) and is not a
+      # superuser (so it still needs *grants*). Phase 8's fix for the anon hole
+      # silently broke the payment webhook that way, and the check above passed the
+      # whole time: a function nobody can execute is trivially not anon-callable.
+      #
+      # Both directions are asserted now. A revoke that goes too far fails here
+      # instead of in production.
+      - name: The server can still execute the functions it needs
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h 127.0.0.1 -p 54322 -U postgres -v ON_ERROR_STOP=1 -c "
+            do \$\$
+            declare
+              t text;
+              blocked text[] := '{}';
+            begin
+              foreach t in array array[
+                'record_payment_event', 'attach_payment_charge',
+                'payment_account_for_webhook', 'payment_credentials_for_payment',
+                'sync_order_payment_status', 'log_integration_attempt',
+                'set_courier_credentials', 'courier_credentials',
+                'record_shipment', 'record_booking_failure'
+              ]
+              loop
+                if exists (
+                  select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+                  where n.nspname = 'public' and p.proname = t
+                    and not has_function_privilege('service_role', p.oid, 'EXECUTE')
+                ) then
+                  blocked := blocked || t;
+                end if;
+              end loop;
+
+              if array_length(blocked, 1) > 0 then
+                raise exception
+                  'The server cannot execute these, so the feature is dead: %. Add: grant execute on function ... to service_role;',
+                  array_to_string(blocked, ', ');
+              end if;
+              raise notice 'service role can execute what it needs OK';
             end
             \$\$;
           "

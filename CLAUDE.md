@@ -5,7 +5,7 @@ Build one phase per session, in order. The full roadmap is in
 [`docs/build-spec.md`](docs/build-spec.md); who we're building for is in
 [`docs/avatar.md`](docs/avatar.md).
 
-**Current state: phase 9 complete.** Next up is phase 10 (courier integration).
+**Current state: phase 10 complete.** Next up is phase 11 (tracking & buyer notifications).
 
 ---
 
@@ -348,6 +348,16 @@ one new file plus one registry line, and zero lines of order logic.
   with the specificity tiebreak deleted. It now numbers them backwards on purpose.
   Same lesson as the phase-6 hard-rule-6 assertion: after writing a test, break the
   thing it guards and watch it fail.
+- **`revoke ... from public` revokes from `service_role` too.** In Supabase
+  `service_role` has `BYPASSRLS`, which bypasses *policies* — it is not a superuser,
+  so it still needs *grants*. Phase 8's correct fix for the anon hole silently broke
+  the payment webhook for a whole phase, and the CI check passed the entire time:
+  "not callable by anon" is trivially true of a function nobody can call. Always
+  pair `revoke ... from public` with an explicit
+  `grant execute ... to service_role`, and assert **both** directions.
+- **After a security fix, re-run the feature's own end-to-end proof.** The SQL suite
+  going green is not the same as the thing still working. That is exactly how the
+  above shipped.
 - **`packer` ranks *below* `staff`.** The hierarchy is owner > admin > staff >
   packer > rider, so `has_tenant_role(t, 'staff')` **excludes** a packer. Guarding
   order fulfilment with `'staff'` locked the packer role out of packing — the one

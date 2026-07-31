@@ -15,8 +15,8 @@ phase's scope and done-when criteria.
 | 7 | Shipping configuration | ✅ Complete |
 | 8 | Payments | ✅ Complete |
 | 9 | Order management dashboard | ✅ Complete |
-| 10 | Courier integration | ⬜ Next |
-| 11 | Tracking & buyer notifications | ⬜ |
+| 10 | Courier integration | ✅ Complete |
+| 11 | Tracking & buyer notifications | ⬜ Next |
 | 12 | COD reconciliation & RTS control | ⬜ |
 | 13 | Live selling capture | ⬜ |
 | 14 | Messenger & social integration | ⬜ |
@@ -978,4 +978,102 @@ asserted, not just reported.
 
 **Gate:** `pnpm verify` (383 tests), `pnpm db:test` (334 assertions),
 `pnpm db:test:concurrency` (23 assertions). All 14 migrations apply from scratch on
+PG 17.6.
+
+---
+
+## Phase 10 — Courier integration
+
+**Done when:** 40 orders are booked and one PDF of 40 labels downloads in under 30
+seconds.
+
+**Measured** over real HTTP against the real server and database, with a stand-in
+courier returning genuine PDF labels:
+
+| | Result | Budget |
+|---|---:|---:|
+| 40 booked, 40-page PDF (120 ms courier latency) | **0.9 s** | 30 s |
+| Same, at 450 ms courier latency | **3.5 s** | 30 s |
+| Distinct waybills | 40 | 40 |
+| Orders moved to `shipped` | 40 | 40 |
+| Timeline rows written | 40 | 40 |
+
+Re-running the same batch books nothing and reports all 40 as already booked. An
+unauthenticated call gets 401; another tenant's member gets 403.
+
+### What shipped
+
+- **`CourierProvider` for J&T and Flash**, deliberately different API shapes —
+  numeric status codes vs string states, peso decimals vs integer centavos, nested
+  vs flat bodies. Two couriers that looked alike would not prove the boundary holds.
+- **Credentials encrypted at rest** with pgcrypto and a key held in the *server's
+  environment*, never in Postgres, so a stolen database dump is useless on its own.
+  Not Supabase Vault, which keeps the key in the same instance — and whose extension
+  version differs between the local stack and the image CI runs.
+- **Bulk booking on the Node server**, because a credential a browser can hold is
+  one a browser extension can read. The dashboard sends its own Supabase token and
+  the *database* decides whether it may book; credentials are decrypted only after
+  that returns.
+- **One merged PDF**, 8 label fetches in parallel, with a named placeholder page for
+  any label that could not be fetched. A seller with 39 good labels needs the 39
+  printed now and the missing one identified — not a failed download.
+- **A booking failure queue** that separates what a retry can fix from what it
+  cannot. An unserviceable barangay is a 400 and gets no `next_retry_at` at all;
+  a 503 gets an exponential curve capped at an hour. Verified: a batch with 5
+  permanent failures booked the other 35, and a re-run resolved 4 transient ones and
+  left the permanent one open.
+- **The waybill and `shipped` are written together**, so an order can never say
+  shipped with nothing to track.
+
+### The find that matters most
+
+**Phase 8's own security fix had broken the payment webhook, and this phase found
+it.** `revoke ... from public` is what actually locks a function down — and it
+revokes from `service_role` too, because in Supabase that role has `BYPASSRLS`
+(which bypasses *policies*) and is not a superuser (so it still needs *grants*).
+
+From that commit until this one, `record_payment_event` answered "permission denied"
+and a paid GCash order would never have reached `paid`. The phase-8 HTTP proof ran
+*before* the revoke and was not repeated after it — the SQL suite went green and
+that was taken as sufficient.
+
+The CI check added in phase 8 passed the whole time, because "not callable by anon"
+is trivially true of a function nobody can call at all. There is now a second check
+asserting the server *can* execute what it needs, and it fails on exactly this
+regression.
+
+### Notable findings
+
+| Symptom | Cause |
+|---|---|
+| The payment webhook returned 42501 for a whole phase | `revoke ... from public` also revoked `service_role`. See above. |
+| Booking a batch reported "2 skipped that had already moved" | The result banner reused the bulk-move wording, so two *failed* parcels were described as duplicates — pointing the seller at the wrong explanation and hiding that two orders needed attention. |
+| `/api/couriers/*` would 404 under `pnpm dev` | One process serves the dashboard and the API in production; in development they are Vite and the Node server. A dev-only difference is the worst kind, so `vite.config.ts` now proxies `/api`. |
+
+### Deliberately deferred
+
+- **`courier_live` shipping rates still charge the rate's flat fallback.** The
+  `quote()` half of both providers is implemented and tested, but wiring it into
+  checkout means a courier round trip on the critical path of a buyer's checkout,
+  with a caching and timeout story of its own. Phase 7 already says the fallback
+  amount is charged until then, and the shipping screen says so on the rate.
+- **Tracking is phase 11.** `parseWebhook` and `track()` are implemented and mapped
+  into Selld's status vocabulary; the inbound webhook route and `shipment_events`
+  land with buyer notifications.
+- **Retries are queued, not driven.** `courier_booking_failures` carries the curve
+  and re-running a batch retries the open ones, but nothing runs on a timer yet —
+  the scheduler belongs with phase 11's tracking poller.
+- **LBC and Ninja Van.** The registry and interface take them; the spec asked for
+  J&T and Flash first.
+
+### Still needed outside the repo
+
+- `COURIER_CREDENTIALS_KEY` must be set in the storefront server's environment.
+  Without it, booking answers 503 rather than pretending to work. Generate with
+  `openssl rand -base64 32`, and **keep it** — rotating it makes every stored
+  credential undecryptable.
+- Each seller connects their own J&T or Flash account on the shipping screen.
+
+**Gate:** `pnpm verify` (405 tests), `pnpm db:test` (355 assertions),
+`pnpm db:test:concurrency` (23 assertions). All 15 migrations apply from scratch on
 PG 17.6.

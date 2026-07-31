@@ -28,6 +28,7 @@ import {
   type StoreRef,
 } from './cart-routes'
 import { CART_COOKIE } from './cookies'
+import { serveCourierRoutes } from './courier-routes'
 import { serveXenditWebhook } from './payment-webhook'
 import { readSupabaseConfig, rpc, type SupabaseConfig } from './supabase-rpc'
 
@@ -282,6 +283,11 @@ async function handle(
   // and its delivery must not depend on which store the hostname happens to name.
   // The account is identified by the slug in the path, never by the host.
   if (await serveXenditWebhook(request, response, url.pathname)) return
+
+  // Courier booking is a dashboard action, not a storefront one, but it needs
+  // server-held credentials — so it lives on the only Node process there is, and
+  // is answered before surface routing for the same reason webhooks are.
+  if (await serveCourierRoutes(request, response, url.pathname, context.supabase)) return
 
   // `.localhost` subdomains resolve to 127.0.0.1 in every modern browser, so
   // `rheas-finds.localhost:5174` exercises the real subdomain path in dev.

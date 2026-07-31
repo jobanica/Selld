@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Package, Printer, Search, X } from 'lucide-react'
+import { Download, Package, Printer, Search, Truck, X } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -23,6 +23,11 @@ import {
   type OrderView,
 } from './orders-api'
 import { availableActions } from './transitions'
+import {
+  bookShipments,
+  describeCourierError,
+  downloadLabels,
+} from '@/features/couriers/couriers-api'
 
 /**
  * The order screen.
@@ -53,6 +58,16 @@ export function OrdersPage() {
   const [packingIds, setPackingIds] = useState<string[] | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [result, setResult] = useState<{ moved: number; skipped: number } | null>(null)
+  /**
+   * Booking gets its own message rather than reusing the bulk-move one.
+   *
+   * It first said "Moved 48, skipped 2 that had already moved" for a batch where two
+   * parcels had *failed* — which points a seller at the wrong explanation entirely,
+   * and hides the fact that two orders need attention.
+   */
+  const [bookResult, setBookResult] = useState<
+    { booked: number; failed: number; alreadyBooked: number } | null
+  >(null)
 
   const orders = useQuery({
     queryKey: ['orders', tenant.id, view, submittedSearch],
@@ -87,6 +102,33 @@ export function OrdersPage() {
   const selectedRows = rows.filter((row) => selected.has(row.id))
   const actions = availableActions(selectedRows)
 
+  /**
+   * Booking is offered for a selection that is packed and ready to hand over.
+   *
+   * Not for `confirmed` orders: booking moves them straight to shipped, so a parcel
+   * would get a waybill before anyone put anything in a box.
+   */
+  const canBook = selectedRows.length > 0 && selectedRows.every((row) => row.fulfillmentStatus === 'packed')
+  const canPrintLabels = selectedRows.length > 0 && selectedRows.every((row) => row.fulfillmentStatus === 'shipped')
+
+  const book = useMutation({
+    mutationFn: () =>
+      bookShipments({ tenantId: tenant.id, orderIds: [...selected], courier: 'jnt' }),
+    onSuccess: async (outcome) => {
+      setBookResult(outcome)
+      setResult(null)
+      setSelected(new Set())
+      setError(null)
+      await invalidate()
+    },
+    onError: (cause) => setError(describeCourierError(cause)),
+  })
+
+  const labels = useMutation({
+    mutationFn: () => downloadLabels({ tenantId: tenant.id, orderIds: [...selected] }),
+    onError: (cause) => setError(describeCourierError(cause)),
+  })
+
   const allSelected = rows.length > 0 && selected.size === rows.length
 
   return (
@@ -119,6 +161,7 @@ export function OrdersPage() {
                 setView(candidate)
                 setSelected(new Set())
                 setResult(null)
+                setBookResult(null)
               }}
               className={cn(
                 'flex min-h-11 items-center gap-1.5 whitespace-nowrap rounded-full border px-3 text-sm transition-colors',
@@ -194,6 +237,24 @@ export function OrdersPage() {
         </p>
       )}
 
+      {bookResult !== null && (
+        <p
+          role="status"
+          className={
+            bookResult.failed > 0
+              ? 'rounded-md border border-warning/40 bg-warning/10 p-3 text-sm'
+              : 'rounded-md border border-success/40 bg-success/10 p-3 text-sm'
+          }
+        >
+          {bookResult.failed > 0
+            ? t('orders.bookedSome', { count: bookResult.booked, failed: bookResult.failed })
+            : t('orders.bookedAll', { count: bookResult.booked })}
+          {bookResult.alreadyBooked > 0
+            ? ` ${t('orders.bookedAlready', { count: bookResult.alreadyBooked })}`
+            : ''}
+        </p>
+      )}
+
       {result !== null && (
         <p role="status" className="rounded-md border border-success/40 bg-success/10 p-3 text-sm">
           {result.skipped === 0
@@ -226,6 +287,18 @@ export function OrdersPage() {
               <Printer className="size-4" aria-hidden="true" />
               {t('orders.print')}
             </Button>
+            {canBook && (
+              <Button onClick={() => book.mutate()} disabled={book.isPending}>
+                <Truck className="size-4" aria-hidden="true" />
+                {book.isPending ? t('orders.booking') : t('orders.bookCourier')}
+              </Button>
+            )}
+            {canPrintLabels && (
+              <Button variant="outline" onClick={() => labels.mutate()} disabled={labels.isPending}>
+                <Download className="size-4" aria-hidden="true" />
+                {t('orders.downloadLabels')}
+              </Button>
+            )}
           </div>
         </div>
       )}

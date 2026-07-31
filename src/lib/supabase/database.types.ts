@@ -232,6 +232,136 @@ export type Database = {
           },
         ]
       }
+      courier_accounts: {
+        Row: {
+          account_ref: string | null
+          connected_at: string | null
+          courier: string
+          created_at: string
+          credentials_encrypted: string | null
+          id: string
+          is_enabled: boolean
+          is_live: boolean
+          origin_address: Json | null
+          sender_name: string | null
+          sender_phone: string | null
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          account_ref?: string | null
+          connected_at?: string | null
+          courier: string
+          created_at?: string
+          credentials_encrypted?: string | null
+          id?: string
+          is_enabled?: boolean
+          is_live?: boolean
+          origin_address?: Json | null
+          sender_name?: string | null
+          sender_phone?: string | null
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          account_ref?: string | null
+          connected_at?: string | null
+          courier?: string
+          created_at?: string
+          credentials_encrypted?: string | null
+          id?: string
+          is_enabled?: boolean
+          is_live?: boolean
+          origin_address?: Json | null
+          sender_name?: string | null
+          sender_phone?: string | null
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "courier_accounts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "courier_accounts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      courier_booking_failures: {
+        Row: {
+          attempts: number
+          courier: string
+          created_at: string
+          error_code: string | null
+          error_message: string
+          id: string
+          kind: string
+          next_retry_at: string | null
+          order_id: string
+          resolved_at: string | null
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          attempts?: number
+          courier: string
+          created_at?: string
+          error_code?: string | null
+          error_message: string
+          id?: string
+          kind: string
+          next_retry_at?: string | null
+          order_id: string
+          resolved_at?: string | null
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          attempts?: number
+          courier?: string
+          created_at?: string
+          error_code?: string | null
+          error_message?: string
+          id?: string
+          kind?: string
+          next_retry_at?: string | null
+          order_id?: string
+          resolved_at?: string | null
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "courier_booking_failures_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "courier_booking_failures_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "courier_booking_failures_tenant_id_order_id_fkey"
+            columns: ["tenant_id", "order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
       customers: {
         Row: {
           created_at: string
@@ -1836,6 +1966,85 @@ export type Database = {
         }
         Relationships: []
       }
+      shipments: {
+        Row: {
+          booked_at: string
+          cod_centavos: number
+          cost_centavos: number | null
+          courier: string
+          created_at: string
+          delivered_at: string | null
+          id: string
+          label_url: string | null
+          order_id: string
+          raw: Json | null
+          service: string
+          status: string
+          tenant_id: string
+          updated_at: string
+          waybill: string
+          weight_grams: number | null
+        }
+        Insert: {
+          booked_at?: string
+          cod_centavos?: number
+          cost_centavos?: number | null
+          courier: string
+          created_at?: string
+          delivered_at?: string | null
+          id?: string
+          label_url?: string | null
+          order_id: string
+          raw?: Json | null
+          service: string
+          status?: string
+          tenant_id: string
+          updated_at?: string
+          waybill: string
+          weight_grams?: number | null
+        }
+        Update: {
+          booked_at?: string
+          cod_centavos?: number
+          cost_centavos?: number | null
+          courier?: string
+          created_at?: string
+          delivered_at?: string | null
+          id?: string
+          label_url?: string | null
+          order_id?: string
+          raw?: Json | null
+          service?: string
+          status?: string
+          tenant_id?: string
+          updated_at?: string
+          waybill?: string
+          weight_grams?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shipments_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shipments_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "shipments_tenant_id_order_id_fkey"
+            columns: ["tenant_id", "order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
       shipping_rates: {
         Row: {
           created_at: string
@@ -2487,6 +2696,69 @@ export type Database = {
       }
     }
     Views: {
+      courier_accounts_safe: {
+        Row: {
+          account_ref: string | null
+          connected_at: string | null
+          courier: string | null
+          created_at: string | null
+          has_credentials: boolean | null
+          id: string | null
+          is_enabled: boolean | null
+          is_live: boolean | null
+          origin_address: Json | null
+          sender_name: string | null
+          sender_phone: string | null
+          tenant_id: string | null
+          updated_at: string | null
+        }
+        Insert: {
+          account_ref?: string | null
+          connected_at?: string | null
+          courier?: string | null
+          created_at?: string | null
+          has_credentials?: never
+          id?: string | null
+          is_enabled?: boolean | null
+          is_live?: boolean | null
+          origin_address?: Json | null
+          sender_name?: string | null
+          sender_phone?: string | null
+          tenant_id?: string | null
+          updated_at?: string | null
+        }
+        Update: {
+          account_ref?: string | null
+          connected_at?: string | null
+          courier?: string | null
+          created_at?: string | null
+          has_credentials?: never
+          id?: string | null
+          is_enabled?: boolean | null
+          is_live?: boolean | null
+          origin_address?: Json | null
+          sender_name?: string | null
+          sender_phone?: string | null
+          tenant_id?: string | null
+          updated_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "courier_accounts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "courier_accounts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       inventory_overview: {
         Row: {
           available: number | null
@@ -2988,6 +3260,14 @@ export type Database = {
         }
         Returns: Json
       }
+      courier_booking_batch: {
+        Args: { p_courier: string; p_order_ids: string[]; p_tenant_id: string }
+        Returns: Json
+      }
+      courier_credentials: {
+        Args: { p_account_id: string; p_key: string }
+        Returns: Json
+      }
       create_manual_order: {
         Args: {
           p_address: Json
@@ -3133,6 +3413,17 @@ export type Database = {
         }
         Returns: Json
       }
+      record_booking_failure: {
+        Args: {
+          p_code?: string
+          p_courier: string
+          p_kind: string
+          p_message: string
+          p_order_id: string
+          p_tenant_id: string
+        }
+        Returns: undefined
+      }
       record_cod_remittance: {
         Args: { p_amount?: number; p_note?: string; p_order_id: string }
         Returns: Json
@@ -3172,6 +3463,21 @@ export type Database = {
           p_provider: string
           p_provider_ref: string
           p_status: string
+        }
+        Returns: Json
+      }
+      record_shipment: {
+        Args: {
+          p_cod?: number
+          p_cost?: number
+          p_courier: string
+          p_label_url?: string
+          p_order_id: string
+          p_raw?: Json
+          p_service: string
+          p_tenant_id: string
+          p_waybill: string
+          p_weight?: number
         }
         Returns: Json
       }
@@ -3224,6 +3530,15 @@ export type Database = {
         }
         Returns: number
       }
+      set_courier_credentials: {
+        Args: {
+          p_courier: string
+          p_credentials: Json
+          p_key: string
+          p_tenant_id: string
+        }
+        Returns: undefined
+      }
       set_stock_level: {
         Args: {
           p_location_id: string
@@ -3252,6 +3567,10 @@ export type Database = {
           p_tenant_id: string
         }
         Returns: undefined
+      }
+      shipment_labels: {
+        Args: { p_order_ids: string[]; p_tenant_id: string }
+        Returns: Json
       }
       storage_path_tenant_id: { Args: { p_name: string }; Returns: string }
       storefront_home: {

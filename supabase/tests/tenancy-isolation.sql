@@ -2675,6 +2675,178 @@ set local role authenticated;
 select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
 
 -- ---------------------------------------------------------------------------
+-- Phase 10: couriers
+-- ---------------------------------------------------------------------------
+-- Two things are new and dangerous here. Courier credentials are the first
+-- *encrypted* secret in the schema, and a shipment is the first row whose
+-- existence changes an order's status — so a cross-tenant write would move
+-- someone else's order to shipped.
+\echo ''
+\echo '=== Phase 10: couriers'
+
+reset role;
+do $$
+declare
+  i record;
+  p record;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p9;
+
+  insert into public.courier_accounts
+    (tenant_id, courier, origin_address, sender_name, sender_phone, account_ref)
+  values (i.rhea_tenant, 'jnt', '{"cityCode":"112402000"}'::jsonb,
+          'Rhea', '+639171234567', 'CUST-RHEA'),
+         (i.marlon_tenant, 'jnt', '{"cityCode":"072217000"}'::jsonb,
+          'Marlon', '+639181234567', 'CUST-MARLON');
+
+  perform public.set_courier_credentials(
+    i.rhea_tenant, 'jnt', '{"apiKey":"RHEA-SECRET"}'::jsonb, 'test-key');
+  update public.courier_accounts set is_enabled = true where tenant_id = i.rhea_tenant;
+
+  perform tests.pass('phase 10 fixture: two courier accounts, one with credentials');
+end;
+$$;
+
+-- ---- Credentials are encrypted, and unreadable either way -------------------
+set local role authenticated;
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+
+  perform tests.rejects(
+    $q$ select credentials_encrypted from public.courier_accounts limit 1 $q$,
+    'not even an admin can read the encrypted credential blob');
+  perform tests.rejects(
+    format($q$ select public.courier_credentials(
+      (select id from public.courier_accounts_safe where tenant_id = %L), 'test-key') $q$,
+      i.rhea_tenant),
+    'nor decrypt it, whatever key they guess');
+  perform tests.rejects(
+    format($q$ select public.set_courier_credentials(%L, 'jnt', '{}'::jsonb, 'x') $q$,
+      i.rhea_tenant),
+    'nor overwrite it with a key of their own');
+
+  -- What they may see: that it is connected, and where from.
+  perform tests.ok((select has_credentials from public.courier_accounts_safe
+                     where tenant_id = i.rhea_tenant),
+    'but the safe view says whether a courier is connected');
+  perform tests.eq((select count(*)::int from public.courier_accounts_safe), 1,
+    'and shows only their own');
+end;
+$$;
+
+-- ---- What is actually stored is ciphertext ---------------------------------
+reset role;
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+
+  -- The plaintext must not be sitting in the column. Asserted rather than assumed:
+  -- an encryption call that silently no-ops would still pass every test above.
+  perform tests.ok(
+    (select position('RHEA-SECRET' in encode(credentials_encrypted, 'escape')) = 0
+     from public.courier_accounts where tenant_id = i.rhea_tenant),
+    'the stored credential does not contain its own plaintext');
+
+  perform tests.eq(
+    (select public.courier_credentials(id, 'test-key') ->> 'apiKey'
+     from public.courier_accounts where tenant_id = i.rhea_tenant),
+    'RHEA-SECRET', 'and the right key decrypts it');
+
+  perform tests.rejects(
+    format($q$ select public.courier_credentials(
+      (select id from public.courier_accounts where tenant_id = %L), 'wrong-key') $q$,
+      i.rhea_tenant),
+    'while a wrong key raises rather than returning garbage');
+end;
+$$;
+
+-- ---- Shipments are tenant-scoped -------------------------------------------
+set local role authenticated;
+select tests.login('22222222-2222-2222-2222-222222222222', 'marlon@example.ph');
+do $$
+declare
+  i record;
+  p record;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p9;
+
+  perform tests.rejects(
+    format($q$ select public.courier_booking_batch(%L, array[%L]::uuid[], 'jnt') $q$,
+      i.rhea_tenant, p.rhea_order),
+    'Marlon cannot pull a booking batch for Rhea''s tenant');
+
+  -- His own tenant with her order id: the batch is scoped, so her order is simply
+  -- not in it. Nothing raises, and nothing leaks.
+  perform tests.rejects(
+    format($q$ select public.courier_booking_batch(%L, array[%L]::uuid[], 'jnt') $q$,
+      i.marlon_tenant, p.rhea_order),
+    'and his own courier is not connected, so there is nothing to book with');
+
+  perform tests.eq(
+    (public.shipment_labels(i.rhea_tenant, array[p.rhea_order]))::text, '[]',
+    'nor can he read her waybills');
+
+  perform tests.eq((select count(*)::int from public.courier_accounts), 1,
+    'he sees only his own courier account');
+  perform tests.eq((select count(*)::int from public.shipments
+                     where tenant_id = i.rhea_tenant), 0,
+    'and none of her shipments');
+end;
+$$;
+
+-- ---- Booking is a packer''s job, credentials are an admin''s ----------------
+select tests.login('33333333-3333-3333-3333-333333333333', 'jess@example.ph');
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+
+  perform tests.ok(
+    public.courier_booking_batch(i.rhea_tenant, array[]::uuid[], 'jnt') is not null,
+    'a packer can pull a booking batch — booking parcels is the job');
+  perform tests.eq((select count(*)::int from public.courier_accounts), 0,
+    'but cannot see the courier account itself');
+end;
+$$;
+
+-- ---- A buyer has no business here ------------------------------------------
+select tests.logout();
+set local role anon;
+do $$
+declare
+  i record;
+  p record;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p9;
+
+  perform tests.rejects($q$ select count(*) from public.courier_accounts $q$,
+    'anon has no grant on courier_accounts');
+  perform tests.rejects($q$ select count(*) from public.shipments $q$,
+    'nor on shipments');
+  perform tests.rejects($q$ select count(*) from public.courier_booking_failures $q$,
+    'nor on the booking failure queue');
+  perform tests.rejects(
+    format($q$ select public.courier_credentials(gen_random_uuid(), 'k') $q$),
+    'and above all cannot decrypt a courier credential');
+  perform tests.rejects(
+    format($q$ select public.record_shipment(%L, %L, 'jnt', 'FAKE1', 'standard') $q$,
+      i.rhea_tenant, p.rhea_order),
+    'nor invent a waybill to move an order to shipped');
+end;
+$$;
+
+reset role;
+set local role authenticated;
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+
+-- ---------------------------------------------------------------------------
 -- my_tenants()
 -- ---------------------------------------------------------------------------
 \echo ''
@@ -2711,8 +2883,8 @@ declare v_passed int := coalesce(nullif(current_setting('tests.passed', true), '
 begin
   raise notice '';
   raise notice '=== % assertions passed', v_passed;
-  if v_passed < 320 then
-    raise exception 'Expected at least 320 assertions, only % ran — did a section get skipped?', v_passed
+  if v_passed < 340 then
+    raise exception 'Expected at least 340 assertions, only % ran — did a section get skipped?', v_passed
       using errcode = 'triggered_action_exception';
   end if;
 end;

@@ -11,6 +11,8 @@ import { useActiveTenant } from '@/features/tenancy/use-tenant'
 import { formatPHP, parsePesos, type Centavos } from '@/lib/money'
 import { cn } from '@/lib/utils'
 
+import { CourierPanel } from '@/features/couriers/courier-panel'
+
 import { RateEditor } from './rate-editor'
 import {
   createZone,
@@ -143,6 +145,9 @@ export function ShippingPage() {
           </ul>
         </>
       )}
+
+      {/* Who actually carries the parcel. Same job as the zones above it. */}
+      <CourierPanel />
 
       <Card>
         <CardHeader>
