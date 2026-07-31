@@ -4224,6 +4224,292 @@ end;
 $$;
 
 reset role;
+
+-- ---------------------------------------------------------------------------
+-- Phase 16: broadcasts, vouchers & abandoned cart
+-- ---------------------------------------------------------------------------
+\echo ''
+\echo '=== Phase 16: broadcasts, vouchers & abandoned cart'
+
+do $$
+declare
+  i record;
+  v_customer uuid;
+  v_discount uuid;
+  v_blast    uuid;
+  v_link     jsonb;
+begin
+  select * into i from tests.ids;
+
+  select id into v_customer from public.customers where tenant_id = i.rhea_tenant limit 1;
+
+  insert into public.discounts (tenant_id, code, name, kind, value, min_subtotal_centavos)
+  values (i.rhea_tenant, 'PAYDAY', 'Payday 15%', 'percent', 1500, 50000)
+  returning id into v_discount;
+
+  insert into public.broadcasts (tenant_id, name, body, segment_definition, channel, discount_id)
+  values (i.rhea_tenant, 'Payday blast', 'Payday sale po! {{storeUrl}}',
+          '{}'::jsonb, 'auto', v_discount)
+  returning id into v_blast;
+
+  v_link := public.short_link_create(i.rhea_tenant,
+    'https://rheas-finds.selld.ph', 'broadcast', v_blast);
+
+  insert into public.broadcast_recipients
+    (tenant_id, broadcast_id, customer_id, channel, address, status, segments, credits)
+  values (i.rhea_tenant, v_blast, v_customer, 'sms', '+639171234567', 'pending', 1, 1);
+
+  create table tests.p16 as
+    select v_discount as discount_id, v_blast as broadcast_id,
+           (v_link ->> 'id')::uuid as link_id, (v_link ->> 'slug') as slug,
+           v_customer as customer_id;
+  grant select on tests.p16 to authenticated, anon;
+
+  perform tests.ok(v_blast is not null,
+    'phase 16 fixture: a voucher, a broadcast, a short link and one recipient');
+end;
+$$;
+
+-- ---- Another store sees none of it ------------------------------------------
+set local role authenticated;
+select tests.login('22222222-2222-2222-2222-222222222222', 'marlon@example.ph');
+do $$
+declare
+  i record;
+  p record;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p16;
+
+  perform tests.eq((select count(*)::int from public.discounts), 0,
+    'Marlon sees none of Rhea''s vouchers');
+  perform tests.eq((select count(*)::int from public.discount_redemptions), 0,
+    'nor who redeemed them');
+  perform tests.eq((select count(*)::int from public.broadcasts), 0,
+    'nor what she has blasted');
+  perform tests.eq((select count(*)::int from public.broadcast_recipients), 0,
+    'nor — the whole customer list, frozen — who she blasted it to');
+  perform tests.eq((select count(*)::int from public.short_links), 0,
+    'nor her tracked links');
+  perform tests.eq((select count(*)::int from public.abandoned_carts), 0,
+    'nor the carts her buyers walked away from');
+
+  -- A voucher code is not a secret, but its *rules* are read through a function
+  -- that names the store, so the store had better be his.
+  perform tests.rejects(
+    format($q$ select public.broadcast_preview(%L, '{}'::jsonb, 'hi', 'auto', null) $q$,
+      i.rhea_tenant),
+    'and he cannot price a send against her list');
+  perform tests.rejects(
+    format($q$ select public.broadcast_save(%L, 'Mine now', 'hi', '{}'::jsonb, 'auto') $q$,
+      i.rhea_tenant),
+    'nor write a draft into her store');
+  perform tests.rejects(format($q$ select public.broadcast_start(%L) $q$, p.broadcast_id),
+    'and above all cannot start a send that spends her credits');
+  perform tests.rejects(format($q$ select public.broadcast_report(%L) $q$, p.broadcast_id),
+    'nor read what one of her sends earned');
+  perform tests.rejects(format($q$ select public.broadcasts_list(%L) $q$, i.rhea_tenant),
+    'nor list them');
+  perform tests.rejects(
+    format($q$ select public.abandoned_carts_report(%L) $q$, i.rhea_tenant),
+    'nor how much she is leaving on the table');
+
+  -- The server-only half of the pipeline.
+  perform tests.rejects(format($q$ select public.broadcast_claim_next(%L) $q$, p.broadcast_id),
+    'the claim loop is the server''s alone');
+  perform tests.rejects(
+    format($q$ select public.broadcast_record_send(%L, 'sent') $q$, p.broadcast_id),
+    'and so is recording what it did');
+  perform tests.rejects(
+    format($q$ select public.short_link_create(%L, 'https://evil.example', 'broadcast') $q$,
+      i.rhea_tenant),
+    'a member of another store cannot mint a link under her domain');
+  perform tests.rejects(format($q$ select public.abandoned_carts_sweep(%L) $q$, i.rhea_tenant),
+    'nor run her abandoned-cart sweep');
+  perform tests.rejects(format($q$ select public.broadcasts_due() $q$),
+    'nor ask the scheduler what is due');
+end;
+$$;
+
+-- ---- The projections are projections ----------------------------------------
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+do $$
+declare
+  i record;
+  p record;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p16;
+
+  perform tests.eq((select count(*)::int from public.discounts), 1,
+    'Rhea reads her own voucher');
+  perform tests.eq((select count(*)::int from public.broadcasts), 1,
+    'and her own send');
+  perform tests.ok(public.broadcast_report(p.broadcast_id) is not null,
+    'and can ask what it earned');
+
+  -- "Used 43 times" has to mean forty-three orders exist. A counter a seller
+  -- could type is a counter that cannot support a decision. `discounts` is the
+  -- one of these tables she can write at all, so it is the one where the guard
+  -- rather than the grant is what stops her — note the 23514.
+  perform tests.rejects(
+    format($q$ update public.discounts set used_count = 999 where id = %L $q$, p.discount_id),
+    'but she cannot type a voucher''s usage count');
+
+  -- And the guard does not turn the row read-only.
+  perform tests.eq(
+    tests.affected(format($q$ update public.discounts set is_active = false where id = %L $q$,
+      p.discount_id)),
+    1::bigint,
+    'switching her own voucher off is still hers to do');
+
+  -- A voucher that is off is indistinguishable from one that never existed: the
+  -- buyer is told 'unknown', not 'this code is switched off', because the second
+  -- confirms a code is real and worth trying again tomorrow.
+  perform tests.eq(
+    public.discount_evaluate(i.rhea_tenant, 'PAYDAY', 100000, 8000, null) ->> 'reason',
+    'unknown',
+    'and a voucher that is off looks exactly like one that was never made');
+
+  perform tests.eq(
+    tests.affected(format($q$ update public.discounts set is_active = true where id = %L $q$,
+      p.discount_id)),
+    1::bigint,
+    'and back on again');
+
+  -- A send and a link are records of what happened, not forms. There is no
+  -- UPDATE grant on either: the only way to change a draft is `broadcast_save`,
+  -- and once it has started there is nothing left to edit.
+  perform tests.rejects(
+    format($q$ update public.broadcasts set sent_count = 999 where id = %L $q$, p.broadcast_id),
+    'a send''s own numbers are not hers to write');
+  perform tests.rejects(
+    format($q$ update public.broadcasts set name = 'July payday' where id = %L $q$,
+      p.broadcast_id),
+    'and neither is anything else on the row, directly');
+  perform tests.rejects(
+    format($q$ update public.short_links set click_count = 999 where id = %L $q$, p.link_id),
+    'nor how many people tapped a link');
+  perform tests.ok(
+    public.broadcast_save(i.rhea_tenant, 'July payday', 'Payday sale po! {{storeUrl}}',
+      '{}'::jsonb, 'auto', p.broadcast_id) = p.broadcast_id,
+    'editing a draft goes through broadcast_save, which is checked');
+
+  -- A recipient row is a record of what was sent, not a form.
+  perform tests.rejects(
+    format($q$ update public.broadcast_recipients set status = 'sent'
+            where broadcast_id = %L $q$, p.broadcast_id),
+    'and she cannot mark a recipient sent by hand');
+end;
+$$;
+
+-- ---- The guards, where they actually earn their keep -----------------------
+--
+-- The four assertions above are true partly because `authenticated` holds no
+-- UPDATE grant, and a missing grant is not a guard: `service_role` has BYPASSRLS
+-- and the definers that maintain these tables run as the owner. So the same
+-- writes are tried again as the owner, where only the trigger stands in the way.
+reset role;
+do $$
+declare p record;
+begin
+  select * into p from tests.p16;
+
+  perform tests.rejects(
+    format($q$ update public.discounts set used_count = 999 where id = %L $q$, p.discount_id),
+    'the owner cannot write a voucher''s usage count either');
+  perform tests.rejects(
+    format($q$ update public.short_links set click_count = 999 where id = %L $q$, p.link_id),
+    'nor a link''s click count');
+  perform tests.rejects(
+    format($q$ update public.broadcasts set sent_count = 999 where id = %L $q$, p.broadcast_id),
+    'nor how many messages a send delivered');
+  -- 999, not 0. Both of these are 0 and 1 on a fresh fixture, and writing back
+  -- the value that is already there is a no-op the guard is right to allow — so
+  -- asserting on it passes without the guard existing at all. That is exactly
+  -- how the phase-15 `rts_orders` assertion passed for the wrong reason.
+  perform tests.rejects(
+    format($q$ update public.broadcasts set credits_spent = 999 where id = %L $q$,
+      p.broadcast_id),
+    'nor what it cost — which is the number the bill is reconciled against');
+  perform tests.rejects(
+    format($q$ update public.broadcasts set recipient_count = 999 where id = %L $q$,
+      p.broadcast_id),
+    'nor how many people it was frozen against');
+
+  -- The maintaining triggers still get through: they run nested, one level
+  -- deeper, which is exactly what `pg_trigger_depth()` distinguishes.
+  perform tests.eq(
+    tests.affected(format($q$ update public.broadcast_recipients set status = 'sent'
+                           where broadcast_id = %L $q$, p.broadcast_id)),
+    1::bigint,
+    'and the trigger that maintains them is not blocked by its own guard');
+  perform tests.eq(
+    (select sent_count from public.broadcasts where id = p.broadcast_id), 1,
+    'the projection followed the row that changed');
+end;
+$$;
+
+set local role authenticated;
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+
+-- ---- A buyer holds a link and a code, and nothing else ----------------------
+select tests.logout();
+set local role anon;
+do $$
+declare
+  i record;
+  p record;
+  v jsonb;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p16;
+
+  perform tests.rejects($q$ select count(*) from public.discounts $q$,
+    'anon has no grant on the voucher table');
+  perform tests.rejects($q$ select count(*) from public.broadcasts $q$,
+    'nor on broadcasts');
+  perform tests.rejects($q$ select count(*) from public.broadcast_recipients $q$,
+    'nor on the frozen recipient list — that table is the customer list');
+  perform tests.rejects($q$ select count(*) from public.short_links $q$,
+    'nor on short links');
+  perform tests.rejects($q$ select count(*) from public.short_link_clicks $q$,
+    'and nobody at all can read the per-click log, which is a browsing history');
+  perform tests.rejects($q$ select count(*) from public.abandoned_carts $q$,
+    'nor on abandoned carts');
+
+  perform tests.rejects(
+    format($q$ select public.broadcast_preview(%L, '{}'::jsonb, 'hi', 'auto', null) $q$,
+      i.rhea_tenant),
+    'a buyer cannot price a send');
+  perform tests.rejects(format($q$ select public.broadcasts_list(%L) $q$, i.rhea_tenant),
+    'nor list a store''s sends');
+  perform tests.rejects(format($q$ select public.broadcast_claim_next(%L) $q$, p.broadcast_id),
+    'nor claim a recipient and read their message');
+  perform tests.rejects(format($q$ select public.broadcast_report(%L) $q$, p.broadcast_id),
+    'nor read a store''s revenue');
+
+  -- What a buyer legitimately holds: a link they were sent, and a code they
+  -- were given. Both answer, and both answer with nothing else.
+  v := public.short_link_follow(p.slug, null);
+  perform tests.eq(v ->> 'target', 'https://rheas-finds.selld.ph',
+    'following a link they were sent gives them the target');
+  perform tests.ok(not (v ? 'tenantId') and not (v ? 'broadcastId'),
+    'and not which store or which send it came from');
+
+  v := public.discount_evaluate(i.rhea_tenant, 'PAYDAY', 100000, 8000, null);
+  perform tests.eq((v ->> 'valid')::boolean, true,
+    'and a code they were given prices itself on their own cart');
+  perform tests.ok(not (v ? 'usageLimit') and not (v ? 'usedCount'),
+    'without telling them how many are left, which is a countdown they can game');
+
+  perform tests.eq((public.discount_evaluate(i.rhea_tenant, 'NOPE', 100000, 8000, null)
+                    ->> 'reason'), 'unknown',
+    'a code that does not exist says so, and says nothing more');
+end;
+$$;
+
+reset role;
 set local role authenticated;
 select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
 
@@ -4264,8 +4550,8 @@ declare v_passed int := coalesce(nullif(current_setting('tests.passed', true), '
 begin
   raise notice '';
   raise notice '=== % assertions passed', v_passed;
-  if v_passed < 545 then
-    raise exception 'Expected at least 545 assertions, only % ran — did a section get skipped?', v_passed
+  if v_passed < 600 then
+    raise exception 'Expected at least 600 assertions, only % ran — did a section get skipped?', v_passed
       using errcode = 'triggered_action_exception';
   end if;
 end;

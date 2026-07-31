@@ -5,8 +5,7 @@ Build one phase per session, in order. The full roadmap is in
 [`docs/build-spec.md`](docs/build-spec.md); who we're building for is in
 [`docs/avatar.md`](docs/avatar.md).
 
-**Current state: phase 15 complete.** Next up is phase 16 (broadcasts, vouchers &
-abandoned cart).
+**Current state: phase 16 complete.** Next up is phase 17 (analytics & reporting).
 
 ---
 
@@ -234,6 +233,22 @@ What follows from that:
   service-role only; the operator's own comment box goes through the checked
   `live_ingest_manual` wrapper.
 
+- **Phase 16 spends the seller's money, so the boundary is the credit.** The
+  sending loop lives in Node — Postgres cannot call somebody else's HTTP API —
+  and every rule it looks like it enforces is enforced on the other side of two
+  calls. `broadcast_claim_next` takes the credit and only then returns the body,
+  under `for update skip locked`; `broadcast_record_send` refunds a failure and a
+  channel that could not carry the message, and refuses to record a send for a
+  recipient that was never claimed. Both are `service_role` only. A seller's own
+  press of the button goes through `broadcast_start`, which checks `staff` before
+  it freezes an audience.
+- **A short link is a fifth capability, weaker than the order number.**
+  `/s/{slug}` has no cookie and no account, so `short_link_follow()` answers with
+  a target and the word "expired" and nothing else — not the store, not the
+  broadcast, not the recipient. `short_link_clicks` has RLS on and **no policy at
+  all**: a per-click log with timestamps is a browsing history, and nothing in the
+  product needs to read one row of it.
+
 **`cart_pricing()` is the only place money is computed.** The quote the buyer sees
 and the order that gets written both go through it, so they cannot disagree.
 `cart_items.unit_price_centavos` is a display snapshot and is never charged —
@@ -251,8 +266,8 @@ src/
   app/          ← dashboard (authenticated seller surface)
   storefront/   ← public buyer surface, own perf budget
   features/     ← feature slices; may import from core and lib
-    address/ auth/ catalog/ cod/ customers/ inbox/ inventory/ live/ onboarding/
-    orders/ tenancy/
+    address/ auth/ broadcasts/ catalog/ cod/ customers/ inbox/ inventory/ live/
+    onboarding/ orders/ tenancy/
   lib/          ← money, phone, psgc, i18n, time, supabase, tenant
   components/ui ← shadcn/ui primitives
 ```
@@ -328,6 +343,14 @@ one new file plus one registry line, and zero lines of order logic.
   maintained by trigger, and a guard rejects direct writes. Insert a
   `stock_movements` row (or call `record_stock_movement` / `set_stock_level`).
   `sum(delta) = on_hand` is asserted by both DB suites.
+- **Nor `discounts.used_count`, `short_links.click_count`, or any of the four
+  counters on `broadcasts`.** Same shape, and phase 16 shipped all six of them
+  maintained by trigger and guarded by nothing — the guards exist because the
+  tenancy assertion was written first and passed. These are the numbers a seller
+  *decides* on: "used 43 times" is why a voucher stays running, and "790 credits"
+  is what the SMS bill gets reconciled against. `pg_trigger_depth() > 1` lets the
+  maintaining trigger through and nobody else. A CI step recomputes each one from
+  the rows it caches.
 - **A guard trigger on a child table must allow the parent's DELETE cascade.** Two
   triggers got this wrong and between them made a tenant undeletable — see
   `20260730000600`. Check whether the parent row still exists: on a cascade it is
@@ -351,9 +374,15 @@ one new file plus one registry line, and zero lines of order logic.
   suffix is i18next v3; from v21 the JSON v4 format expects CLDR category
   suffixes. Nothing warns — the lookup just misses and falls back to the
   singular, so `{{count}} items` rendered as "3 item" through two whole phases.
-  `src/lib/i18n/plurals.test.ts` guards it. In `tl` both forms carry the same
-  text on purpose: Tagalog nouns are not inflected for number, which is also why
-  CLDR puts 2 and 3 in tl's `one` category.
+  `src/lib/i18n/plurals.test.ts` guards it.
+- **In `tl`, `_one` and `_other` must carry the *same string*.** Tagalog does not
+  inflect a noun after a numeral — "tatlong customer" — so an English-style split
+  is wrong on its own terms. It is also wrong in a way that reads as broken,
+  because CLDR's rule for `fil` is not English's: `other` fires only for counts
+  ending in 4, 6 or 9. Seventeen keys across five phases shipped split, so they
+  rendered "790 credit" and "800 customer" while rendering "6 credits". Nothing
+  warned; a broadcast quoting 790 is what finally showed it. `plurals.test.ts`
+  now asserts the two forms are identical for every `tl` key.
 - **Server rendering needs `createI18nInstance()`, not `initI18n()`.** The
   singleton's `initialised` guard is right for a browser and wrong for a server:
   the first request's locale would apply to every later one, so one Taglish store
@@ -545,6 +574,33 @@ one new file plus one registry line, and zero lines of order logic.
   whatever is already in the database, so editing a migration and re-running the
   tests proves nothing about the edit. Sabotage a function with
   `create or replace` over the live database, or `pnpm db:reset` first.
+- **Quote the message, not the template.** `{{storeUrl}}` is twelve characters in
+  the seller's textarea and about forty on the recipient's phone, and `{{name}}`
+  and `{{code}}` move too — so measuring `sms_segments()` on the draft prices a
+  different message from the one that gets sent. A 140-character body measures one
+  segment as a template and goes out as two: the seller agrees to 790 credits and
+  the platform is billed for 1,580. `broadcast_preview` and `broadcast_start` both
+  render first, and both do it per recipient, because a long first name can tip
+  one person into a second segment on its own. The slug is always six characters,
+  so the preview's stand-in link is exact rather than an estimate.
+- **A sabotage that cannot bite is not a passing test.** Removing the
+  out-of-credits branch from `broadcast_claim_next` changed nothing, because the
+  probe topped up 1,000 credits for 30 recipients — with credits to spare, taking
+  them before the send and after it look identical. The probe now sends 30
+  messages on a balance of 5. When a sabotage comes back green, the first
+  suspicion should be the fixture, not the guard.
+- **`pnpm seed:demo` creates a store with no members.** A harness that reads
+  `select user_id from tenant_members … limit 1` gets null on a fresh database,
+  and every `is_tenant_member()` check then answers "Not allowed" — which reads
+  like a security regression and is a missing fixture. Harnesses insert their own
+  owner. (And a hand-inserted `auth.users` row breaks GoTrue's `/otp` with a 500,
+  so a browser harness signs in *first* and grants membership *second*.)
+- **A missing GRANT is not a guard.** Four of the phase-16 counter assertions
+  passed as `authenticated` because that role holds no UPDATE grant on the table
+  at all — which says nothing about `service_role` (BYPASSRLS) or the definers
+  that maintain it. The suite re-runs the same writes as the owner, where only
+  the trigger stands in the way. Check the SQLSTATE: 42501 is a grant, 23514 is
+  the guard.
 
 ## Package manager
 

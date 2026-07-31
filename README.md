@@ -5,7 +5,7 @@
 Multi-tenant ecommerce + order operations platform for Philippine social sellers.
 Working name: **Selld** (`selld.ph` / `selld.store`).
 
-> **Status: phase 15 (Customers & CRM) complete.** Next: phase 16, broadcasts, vouchers & abandoned cart.
+> **Status: phase 16 (Broadcasts, vouchers & abandoned cart) complete.** Next: phase 17, analytics & reporting.
 > See [`docs/phase-status.md`](docs/phase-status.md).
 
 ---
@@ -128,7 +128,7 @@ naive UTC date splits one Manila morning across two buckets.
 **Tenant isolation is enforced in the database, not the client.** Every
 tenant-scoped policy funnels through `is_tenant_member(tenant_id)`, and
 [`supabase/tests/tenancy-isolation.sql`](supabase/tests/tenancy-isolation.sql)
-proves cross-tenant reads and writes return nothing — 556 assertions, run in CI on
+proves cross-tenant reads and writes return nothing — 608 assertions, run in CI on
 every PR. The suite is verified by sabotage: break RLS and it fails. Read the
 "Writing a tenant-scoped table" section of [`CLAUDE.md`](CLAUDE.md) before adding
 a table.
@@ -151,6 +151,14 @@ anyone. So `message_send_allowed()` is the single decision point, every path ask
 before it sends rather than after, and
 [`supabase/tests/tenancy-isolation.sql`](supabase/tests/tenancy-isolation.sql)
 drives all six ways it can say no.
+
+**A broadcast is charged what it was quoted.** The number on the button and the
+number on the bill are both `sms_segments()` of the *rendered* message — the one
+with the short link and the buyer's first name in it, not the template with
+`{{storeUrl}}` still in it, which is twenty-eight characters shorter and would
+under-bill a long draft by half. Credits are moved per recipient *before* the
+message is handed to the provider, so a send interrupted halfway has spent
+exactly what went out, and a CI step asserts the quote and the freeze agree.
 
 ## Documentation
 

@@ -1571,3 +1571,86 @@ own segment on the next read. In the browser at 390px the count narrows
 
 **Gate:** `pnpm verify` (499 tests), `pnpm db:test` (556 assertions),
 `pnpm db:test:concurrency`. All 20 migrations apply from scratch on PG 17.6.
+
+---
+
+## Phase 16 — Broadcasts, vouchers & abandoned cart
+
+**Done when:** a payday broadcast to 800 segmented customers sends with cost
+shown upfront and revenue attribution shown after.
+
+**Measured** over real HTTP against a list built the way a real one is — most
+reachable by SMS, a handful reachable free over Messenger because they wrote to
+the Page this morning, and a few not reachable at all:
+
+| Before the button does anything | |
+|---|---|
+| the segment | 800 people |
+| by SMS | 790, at 1 segment each |
+| free on Messenger | 5 — inside phase 14's 24-hour window |
+| unreachable | 5, and named as such |
+| **quoted** | **790 credits** |
+| the same message, one emoji heavier | 1,580 — shown before sending, not after |
+
+| After | |
+|---|---|
+| sent | 795 in 10.0s |
+| charged | 790 — the ledger moved 18,520 → 17,730 |
+| pressing send again | 0 sent, 0 charged |
+| attributed | 3 orders, ₱1,089.30, in the 7 days after |
+| of which used the voucher it carried | 1 order, ₱333.30, ₱44.70 given away |
+| a stranger's order in the same window | not credited to it |
+
+### What shipped
+
+- **A cost preview that quotes the message, not the draft.** `sms_segments()` is
+  a SQL mirror of the GSM-7/UCS-2 rule, and both the quote and the charge measure
+  it on the *rendered* body — because `{{storeUrl}}` is twelve characters in the
+  seller's textarea and about forty on the recipient's phone.
+- **Credits taken before the send, not after.** `broadcast_claim_next` moves the
+  credit and only then hands back the body; `for update skip locked` lets two
+  workers drain the same broadcast without anyone getting two copies, and a
+  seller who closes the tab has spent exactly what went out.
+- **Vouchers**: codes and automatic discounts, percentage / peso / free shipping,
+  caps, minimum spend, usage limits overall and per customer. `cart_pricing` is
+  still the only place money is computed, and checkout re-evaluates the code
+  against the buyer's phone rather than trusting the cart's quote.
+- **Short links** at `/s/{slug}` — six characters from an alphabet with no vowels
+  and no ambiguous glyphs, a 302 rather than a 301 so the second tap still
+  reaches us, `X-Robots-Tag: noindex`, and a click log that stores no IP and no
+  user agent.
+- **Revenue attribution** over a window after the send, split into what the
+  broadcast reached and what the voucher it carried actually redeemed.
+- **Abandoned cart recovery** at 1h / 24h / 72h, measured from the last reminder
+  rather than from the cart, so a sweep that runs late does not fire three at
+  once.
+
+### Notable findings
+
+| Symptom | Cause |
+|---|---|
+| A 140-character draft was quoted at one segment and would have been billed as two | The quote measured the *template*. `{{storeUrl}}` is 12 characters and the link is ~40, so the message the seller agreed a price for was not the message that was sent. Both sides now measure the rendered body, and CI asserts they agree. |
+| Four counters were writable by hand | `discounts.used_count`, `short_links.click_count` and the four on `broadcasts` were maintained by trigger and guarded by nothing — the same defect phase 4 fixed on `on_hand` and phase 15 on lifetime value. Found by writing the tenancy assertion first and watching it pass. |
+| Taglish rendered "790 credit" and "800 customer" | CLDR's plural rule for `fil` is not the English one: `other` fires only for counts ending in 4, 6 or 9. Seventeen keys across five phases carried an English-style `_one`/`_other` split, so they showed the singular for almost every number and the plural for a scattering. `plurals.test.ts` now asserts the two forms are identical in `tl`. |
+| Five keystrokes cost five full segment scans | The preview's query key contained the raw body, so composing a 60-character blast fired sixty queries over the whole customer table, from a phone on mobile data. Debounced to the settled body; the charge was never involved. |
+| A sabotage that removed the credit check changed nothing | The probe topped up 1,000 credits for 30 recipients, so the branch never ran. With credits to spare, taking them first and taking them last look identical — the probe now sends 30 messages on a balance of 5. |
+| A disabled button read "Send for 0 credits" | `cost?.credits ?? 0`. Unpriced and free render the same; it now says "Send" until there is a quote. |
+
+### Deliberately deferred
+
+- **No scheduled sending.** `broadcasts.scheduled_at` and `broadcasts_due()`
+  exist and are service-role only; what is missing is the thing that calls them
+  on a timer, which is phase 21's job runner rather than a `setInterval` in the
+  storefront process.
+- **No per-recipient delivery receipts.** The SMS provider is the log provider in
+  development, and a delivery report that says "sent" is honest about what we
+  know. Real DLRs arrive on a webhook and belong with a real provider.
+- **Abandoned-cart reminders are not sent automatically** for the same reason:
+  the sweep, the schedule and the escalating voucher are all here and asserted,
+  and the timer that drives them is not.
+- **No A/B testing on a broadcast.** Two variants means two audiences and a
+  significance question, and a seller with 800 customers does not have the
+  traffic for the answer to mean anything.
+
+**Gate:** `pnpm verify` (501 tests), `pnpm db:test` (608 assertions),
+`pnpm db:test:concurrency`. All 21 migrations apply from scratch on PG 17.6.

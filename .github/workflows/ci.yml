@@ -305,7 +305,14 @@ jobs:
                 'customers_list', 'customer_profile', 'customer_segment_preview',
                 'customer_segment_count', 'customer_segment_save', 'customer_segments_list',
                 'customers_merge', 'customers_import',
-                'customer_segment_match', 'customer_stats_refresh'
+                'customer_segment_match', 'customer_stats_refresh',
+                'broadcast_preview', 'broadcast_save', 'broadcast_start',
+                'broadcast_report', 'broadcasts_list', 'broadcasts_due',
+                'broadcast_claim_next', 'broadcast_record_send', 'broadcast_channel_for',
+                'broadcast_render', 'short_link_create',
+                'abandoned_carts_sweep', 'abandoned_carts_due',
+                'abandoned_cart_record_reminder', 'abandoned_carts_report',
+                'sms_segments'
               ]
               loop
                 if exists (
@@ -362,7 +369,11 @@ jobs:
                 'social_account_for_page', 'social_account_for_thread',
                 'record_inbound_message', 'record_outbound_message',
                 'record_post_comment', 'record_comment_reply', 'record_comment_dm',
-                'message_send_allowed_raw'
+                'message_send_allowed_raw',
+                'broadcast_claim_next', 'broadcast_record_send', 'short_link_create',
+                'short_link_follow', 'broadcasts_due', 'abandoned_carts_sweep',
+                'abandoned_carts_due', 'abandoned_cart_record_reminder',
+                'discount_evaluate', 'discount_auto_best', 'cart_apply_discount'
               ]
               loop
                 if exists (
@@ -602,6 +613,167 @@ jobs:
               end;
 
               raise notice 'customer totals are a projection of their orders OK';
+              raise exception 'rollback';
+            exception when others then
+              if sqlerrm <> 'rollback' then raise; end if;
+            end
+            \$\$;
+          "
+
+      # Phase 16 adds four more counters of the same shape, and they are the ones a
+      # seller *decides* on: "this voucher has been used 43 times" is what keeps it
+      # running, and "this send cost 790 credits" is what the SMS bill is
+      # reconciled against. Both shipped writable by hand — the guards that make
+      # them projections were added only after the tenancy suite asked for them.
+      #
+      # Asserted the same way as the two above: recompute from the rows the
+      # counter is a cache of, then try to write it and require the guard.
+      - name: Voucher and broadcast counters are projections, not fields
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h 127.0.0.1 -p 54322 -U postgres -v ON_ERROR_STOP=1 -c "
+            do \$\$
+            declare
+              v_tenant   uuid;
+              v_customer uuid;
+              v_discount uuid;
+              v_order    uuid;
+              v_blast    uuid;
+              v_drift    int;
+            begin
+              insert into public.tenants (name, slug, status)
+              values ('CI Blast', 'ci-blast', 'active') returning id into v_tenant;
+              insert into public.customers (tenant_id, name, phone)
+              values (v_tenant, 'CI Buyer', '+639171230002') returning id into v_customer;
+              insert into public.discounts
+                (tenant_id, code, name, kind, value, min_subtotal_centavos)
+              values (v_tenant, 'CIPAY', 'CI 10%', 'percent', 1000, 0)
+              returning id into v_discount;
+
+              insert into public.orders
+                (tenant_id, order_number, customer_id, contact_name, contact_phone,
+                 shipping_address, subtotal_centavos, discount_total_centavos,
+                 grand_total_centavos, payment_method, payment_status, fulfillment_status)
+              values (v_tenant, 'B1', v_customer, 'CI Buyer', '+639171230002', '{}'::jsonb,
+                      100000, 10000, 90000, 'cod', 'unpaid', 'delivered')
+              returning id into v_order;
+
+              insert into public.discount_redemptions
+                (tenant_id, discount_id, order_id, customer_id, phone, amount_centavos)
+              values (v_tenant, v_discount, v_order, v_customer, '+639171230002', 10000);
+
+              select count(*)::int into v_drift
+              from public.discounts d
+              where d.id = v_discount
+                and d.used_count <> (select count(*)::int from public.discount_redemptions r
+                                     where r.discount_id = d.id);
+              if v_drift > 0 then
+                raise exception 'a voucher usage count does not match its redemptions';
+              end if;
+
+              insert into public.broadcasts (tenant_id, name, body, segment_definition)
+              values (v_tenant, 'CI blast', 'hello {{storeUrl}}', '{}'::jsonb)
+              returning id into v_blast;
+              insert into public.broadcast_recipients
+                (tenant_id, broadcast_id, customer_id, channel, address, status, segments, credits)
+              values
+                (v_tenant, v_blast, v_customer, 'sms', '+639171230002', 'sent', 1, 1);
+
+              if (select sent_count from public.broadcasts where id = v_blast) <> 1
+                 or (select credits_spent from public.broadcasts where id = v_blast) <> 1 then
+                raise exception 'a broadcast counter does not match its recipients';
+              end if;
+
+              begin
+                update public.discounts set used_count = 99 where id = v_discount;
+                raise exception 'a voucher usage count is writable by hand';
+              exception when check_violation then
+                null;
+              end;
+
+              begin
+                update public.broadcasts set credits_spent = 99 where id = v_blast;
+                raise exception 'what a send cost is writable by hand';
+              exception when check_violation then
+                null;
+              end;
+
+              raise notice 'voucher and broadcast counters are projections OK';
+              raise exception 'rollback';
+            exception when others then
+              if sqlerrm <> 'rollback' then raise; end if;
+            end
+            \$\$;
+          "
+
+      # The number on the button has to be the number on the bill. Both sides
+      # measure `sms_segments` of the *rendered* message — not of the template —
+      # because `{{storeUrl}}` is twelve characters in the seller's textarea and
+      # about forty on the recipient's phone. Quoting the template under-bills a
+      # 140-character draft by half, and the seller finds out from their credit
+      # balance rather than from the screen they agreed on.
+      - name: A broadcast is charged what it was quoted
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h 127.0.0.1 -p 54322 -U postgres -v ON_ERROR_STOP=1 -c "
+            do \$\$
+            declare
+              v_tenant uuid;
+              v_user   uuid;
+              v_body   text;
+              v_quote  jsonb;
+              v_blast  uuid;
+              v_frozen int;
+              n int;
+            begin
+              insert into auth.users (id, email)
+              values (gen_random_uuid(), 'ci-blast@example.ph') returning id into v_user;
+              perform set_config('request.jwt.claims',
+                json_build_object('sub', v_user, 'role', 'authenticated')::text, true);
+              v_tenant := (public.create_tenant('CI Quote', 'ci-quote')).id;
+
+              for n in 1..5 loop
+                insert into public.customers (tenant_id, name, phone, source)
+                values (v_tenant, 'Buyer ' || n, '+63918000000' || n, 'import');
+              end loop;
+              perform public.sms_credit_move(v_tenant, 100, 'topup', null, 'ci');
+
+              -- 140 characters. Plus the four braces of the placeholder, which are
+              -- GSM-7 extension characters at two septets each, that is 144 — one
+              -- segment. What is sent is 165 characters, which is two.
+              v_body := 'Payday sale po! 15% off sa lahat ng skincare at bags, '
+                     || 'hanggang bukas na lang ito, huwag na palampasin ito: '
+                     || '{{storeUrl}} Maraming salamat po!';
+
+              if length(v_body) <> 140 then
+                raise exception 'the fixture body drifted: % characters', length(v_body);
+              end if;
+              if public.sms_segments(v_body) <> 1 then
+                raise exception 'the template alone should measure one segment';
+              end if;
+
+              v_quote := public.broadcast_preview(v_tenant, '{}'::jsonb, v_body, 'auto', null);
+              if (v_quote ->> 'segments')::int <> 2 then
+                raise exception
+                  'the quote measured the template, not the message: % segments',
+                  v_quote ->> 'segments';
+              end if;
+
+              v_blast := public.broadcast_save(v_tenant, 'CI quote', v_body, '{}'::jsonb, 'auto');
+              perform public.broadcast_start(v_blast);
+
+              select coalesce(sum(segments), 0) into v_frozen
+              from public.broadcast_recipients
+              where broadcast_id = v_blast and channel = 'sms';
+
+              if v_frozen <> (v_quote ->> 'credits')::int then
+                raise exception 'quoted % credits and froze %',
+                  v_quote ->> 'credits', v_frozen;
+              end if;
+
+              raise notice 'a broadcast is charged what it was quoted OK (% credits)', v_frozen;
               raise exception 'rollback';
             exception when others then
               if sqlerrm <> 'rollback' then raise; end if;

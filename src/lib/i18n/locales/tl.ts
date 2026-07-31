@@ -10,6 +10,20 @@ import type { Translations } from './en'
  * tissue and anything with feeling in it.
  *
  * Typed as `Translations`, so this file cannot drift out of sync with `en.ts`.
+ *
+ * ## Plurals: `_one` and `_other` must carry the *same* text here
+ *
+ * A numeral in Tagalog does not inflect the noun after it — "tatlong customer,"
+ * not "tatlong customers" — so an English-style split is wrong on its own terms.
+ * It is also wrong in a way that reads as broken rather than as a translation
+ * choice, because CLDR's rule for `fil` is not the English one: `other` fires
+ * only for counts ending in 4, 6 or 9. Splitting the two forms therefore renders
+ * "790 credit" and "800 customer" while rendering "6 credits" — the singular for
+ * almost everything and the plural for a scattering of numbers, which is the
+ * opposite of what whoever wrote the split intended.
+ *
+ * Seventeen keys shipped that way across five phases before anyone read one at
+ * 790. `plurals.test.ts` now asserts the two forms are identical.
  */
 export const tl: Translations = {
   app: {
@@ -27,6 +41,7 @@ export const tl: Translations = {
     customers: 'Mga Customer',
     liveSelling: 'Live Selling',
     inbox: 'Inbox',
+    broadcasts: 'Mga Broadcast',
     payments: 'Payments',
     cod: 'COD at returns',
     shipping: 'Shipping',
@@ -310,15 +325,15 @@ export const tl: Translations = {
     selectedCount_one: '{{count}} ang napili',
     selectedCount_other: '{{count}} ang napili',
     itemCount_one: '{{count}} item',
-    itemCount_other: '{{count}} items',
+    itemCount_other: '{{count}} item',
     movedAll_one: 'Na-move ang {{count}} order.',
-    movedAll_other: 'Na-move ang {{count}} orders.',
+    movedAll_other: 'Na-move ang {{count}} order.',
     movedSome: 'Na-move ang {{count}}, na-skip ang {{skipped}} na na-move na dati.',
     print: 'I-print',
     bookCourier: 'I-book sa courier',
     booking: 'Bino-book…',
     bookedAll_one: 'Na-book ang {{count}} parcel.',
-    bookedAll_other: 'Na-book ang {{count}} parcels.',
+    bookedAll_other: 'Na-book ang {{count}} parcel.',
     bookedSome: 'Na-book ang {{count}}. {{failed}} ang hindi na-book — tingnan ang failures.',
     bookedAlready: '{{count}} ang may waybill na.',
     downloadLabels: 'I-download ang labels',
@@ -358,10 +373,10 @@ export const tl: Translations = {
     issueRefund: 'I-refund',
     refunded: 'na-refund {{amount}}',
     packingFor_one: 'Packing slip para sa {{count}} order',
-    packingFor_other: 'Packing slips para sa {{count}} orders',
+    packingFor_other: 'Packing slip para sa {{count}} order',
     pickingList: 'Picking list',
     pickingListHint_one: 'Lahat ng kukunin sa shelf para sa {{count}} order.',
-    pickingListHint_other: 'Lahat ng kukunin sa shelf para sa {{count}} orders.',
+    pickingListHint_other: 'Lahat ng kukunin sa shelf para sa {{count}} order.',
     item: 'Item',
     sku: 'SKU',
     qty: 'Qty',
@@ -712,6 +727,76 @@ export const tl: Translations = {
     errorDuplicateRef: 'May live session na nakikinig sa video na iyan.',
     errorUnknown: 'May naging problema. Subukan mo ulit.',
   },
+  broadcasts: {
+    // Taglish. "SMS", "Messenger", "credits", "voucher", "code" at "segment" ay
+    // nananatiling English — iyon ang nakikita ng seller sa provider nila at sa
+    // Facebook mismo.
+    title: 'Mga Broadcast',
+    subtitle: 'I-message ang segment. Makikita mo ang presyo bago mag-send, at ang kita pagkatapos.',
+    composeTitle: 'Bagong broadcast',
+    composeSubtitle: 'Piliin kung kanino, isulat, tapos tingnan ang presyo.',
+    segmentLabel: 'Ipadala kay',
+    segmentEveryone: 'Lahat',
+    bodyLabel: 'Mensahe',
+    bodyPlaceholder: 'Payday sale po! 15% off today lang: {{storeUrl}}',
+    bodyHint:
+      'Ang {{name}} ay magiging first name nila, ang {{storeUrl}} ay short link na kayang subaybayan, ang {{code}} ang voucher sa ibaba. Iwasan ang ₱ at emoji — dodoble ang bayad.',
+    voucherLabel: 'Isama ang voucher',
+    voucherNone: 'Wala',
+    nameLabel: 'Pangalanan ang send na ito',
+    namePlaceholder: 'Payday blast ng Hulyo',
+
+    costPending: 'Magsulat ng mensahe para makita ang presyo.',
+    costCredits_one: '{{count}} credit',
+    costCredits_other: '{{count}} credit',
+    costSplit: '{{sms}} sa SMS · {{messenger}} libre sa Messenger · {{unreachable}} hindi maabot',
+    costSegments_one: '{{count}} SMS segment bawat isa',
+    costSegments_other: '{{count}} SMS segment bawat isa',
+    costBalance: '{{balance}} credit ang natitira',
+    costShort: 'Kulang ang credits para sa send na ito.',
+    sendIdle: 'I-send',
+    sendAction_one: 'I-send sa {{count}} credit',
+    sendAction_other: 'I-send sa {{count}} credit',
+    sending: 'Sending… {{count}} na',
+
+    reportSubtitle: 'Ano ang nangyari pagkatapos.',
+    reportDelivery: '{{sent}} na-send · {{skipped}} nilaktawan · {{credits}} credit ang nagastos',
+    reportClicks_one: '{{count}} pindot sa link',
+    reportClicks_other: '{{count}} pindot sa link',
+    reportRevenue: '{{amount}} mula sa {{orders}} order sa loob ng {{days}} araw pagkatapos',
+    reportRedeemed: '{{orders}} dito ang gumamit ng voucher ({{amount}})',
+    historyTitle: 'Mga nakaraang send',
+    historyCredits_one: '{{count}} credit',
+    historyCredits_other: '{{count}} credit',
+    historyLine: '{{sent}} na-send · {{clicks}} pindot',
+
+    vouchersTitle: 'Mga Voucher',
+    vouchersSubtitle: 'Mga code na pwedeng isama sa broadcast, o ipamigay kahit saan.',
+    voucherAuto: 'Automatic',
+    voucherPercent: '{{value}}% off',
+    voucherFixed: '{{amount}} off',
+    voucherFreeShipping: 'Libreng shipping',
+    voucherUsed_one: 'nagamit {{count}} beses',
+    voucherUsed_other: 'nagamit {{count}} beses',
+    voucherOn: 'I-on',
+    voucherOff: 'I-off',
+    voucherCodeLabel: 'Code',
+    voucherKindLabel: 'Ano ang ginagawa nito',
+    voucherKindPercent: 'Porsyentong bawas',
+    voucherKindFixed: 'Piso na bawas',
+    voucherKindShipping: 'Libreng shipping',
+    voucherValuePercent: 'Ilang porsyento',
+    voucherValueFixed: 'Ilang piso',
+    voucherMinLabel: 'Minimum na bilihin (₱, 0 kung wala)',
+    voucherCreateAction: 'Gumawa ng voucher',
+
+    errorBadCode: 'Ang code ay 3–24 letra, numero, dash o underscore.',
+    errorDuplicateCode: 'May voucher ka nang ganyan ang code.',
+    errorBadBody: 'Ang mensahe ay 1 hanggang 900 characters.',
+    errorNotAllowed: 'Walang permission ang account mo para mag-send para sa store na ito.',
+    errorNotConfigured: 'Hindi pa naka-setup ang pagpapadala sa server na ito.',
+    errorUnknown: 'May naging problema. Subukan mo ulit.',
+  },
   customers: {
     // Taglish. "RTS", "COD", "segment", "import" and "order" stay in English —
     // those are the words sellers already use, in the courier portal and in
@@ -720,7 +805,7 @@ export const tl: Translations = {
     subtitle: 'Sino ang bumili, magkano ang nagastos, at sino ang natahimik na.',
     segmentsAction: 'Segments',
     listTitle_one: '{{count}} customer',
-    listTitle_other: '{{count}} customers',
+    listTitle_other: '{{count}} customer',
     searchPlaceholder: 'Hanapin ang pangalan o number',
     sortLabel: 'Ayusin ayon sa',
     sortRecent: 'Pinakabagong order',
@@ -729,7 +814,7 @@ export const tl: Translations = {
     sortName: 'Pangalan',
     empty: 'Wala pang customer. Lalabas sila dito pagkatapos ng unang order.',
     orderCount_one: '{{count}} order',
-    orderCount_other: '{{count}} orders',
+    orderCount_other: '{{count}} order',
     neverOrdered: 'hindi pa nag-o-order',
     rtsBadge_one: '{{count}} RTS',
     rtsBadge_other: '{{count}} RTS',
@@ -757,7 +842,7 @@ export const tl: Translations = {
     segmentTitle: 'Gumawa ng segment',
     segmentSubtitle: 'Magtanong. Kusang nag-a-update ang sagot.',
     segmentCount_one: '{{count}} customer',
-    segmentCount_other: '{{count}} customers',
+    segmentCount_other: '{{count}} customer',
     segmentBought: 'Bumili ng',
     segmentAnything: 'Kahit ano',
     segmentSpent: 'Gumastos ng at least (₱)',
@@ -801,7 +886,7 @@ export const tl: Translations = {
     threadsTitle: 'Mga usapan',
     empty: 'Wala pang usapan. Lalabas dito agad pag may nag-message sa Page mo.',
     orderCount_one: '{{count}} order',
-    orderCount_other: '{{count}} orders',
+    orderCount_other: '{{count}} order',
 
     windowNone: 'Hindi pwedeng i-message',
     windowClosed: 'Sarado na',
@@ -892,7 +977,7 @@ export const tl: Translations = {
     overdueTitle_other: '{{count}} delivered mahigit 30 araw na, hindi pa bayad',
     daysOld: '{{count}} araw',
     unknownTitle_one: '{{count}} bayad para sa waybill na hindi natin kilala',
-    unknownTitle_other: '{{count}} bayad para sa mga waybill na hindi natin kilala',
+    unknownTitle_other: '{{count}} bayad para sa waybill na hindi natin kilala',
     unknownHint: 'Madalas mali lang ang pagkaka-type. Minsan parcel ng ibang merchant.',
     varianceTitle_one: '{{count}} bayad na hindi tugma',
     varianceTitle_other: '{{count}} bayad na hindi tugma',
@@ -928,8 +1013,8 @@ export const tl: Translations = {
     batchProblems_one: '{{count}} problema',
     batchProblems_other: '{{count}} problema',
 
-    rtsDialogTitle_one: 'I-record ang return',
-    rtsDialogTitle_other: 'I-record ang {{count}} returns',
+    rtsDialogTitle_one: 'I-record ang {{count}} return',
+    rtsDialogTitle_other: 'I-record ang {{count}} return',
     reasonLabel: 'Bakit bumalik?',
     reasonUnreachable: 'Hindi sumasagot ang buyer',
     reasonRefused: 'Ayaw tanggapin ng buyer',
@@ -947,8 +1032,8 @@ export const tl: Translations = {
     noteLabel: 'Note',
     notePlaceholder: 'Tatlong beses sinubukan ng rider',
     rtsSaving: 'Sine-save…',
-    rtsConfirm_one: 'I-record ang return',
-    rtsConfirm_other: 'I-record ang {{count}} returns',
+    rtsConfirm_one: 'I-record ang {{count}} return',
+    rtsConfirm_other: 'I-record ang {{count}} return',
     rtsTitle: 'Mga return',
     rtsSubtitle: 'Huling {{days}} araw.',
     rtsCount: 'Bumalik na parcel',

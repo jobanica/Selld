@@ -43,6 +43,86 @@ export type Database = {
   }
   public: {
     Tables: {
+      abandoned_carts: {
+        Row: {
+          cart_id: string
+          created_at: string
+          customer_id: string | null
+          discount_id: string | null
+          id: string
+          item_count: number
+          last_reminder_at: string | null
+          phone: string | null
+          recovered_at: string | null
+          recovered_order_id: string | null
+          reminders_sent: number
+          subtotal_centavos: number
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          cart_id: string
+          created_at?: string
+          customer_id?: string | null
+          discount_id?: string | null
+          id?: string
+          item_count?: number
+          last_reminder_at?: string | null
+          phone?: string | null
+          recovered_at?: string | null
+          recovered_order_id?: string | null
+          reminders_sent?: number
+          subtotal_centavos?: number
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          cart_id?: string
+          created_at?: string
+          customer_id?: string | null
+          discount_id?: string | null
+          id?: string
+          item_count?: number
+          last_reminder_at?: string | null
+          phone?: string | null
+          recovered_at?: string | null
+          recovered_order_id?: string | null
+          reminders_sent?: number
+          subtotal_centavos?: number
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "abandoned_carts_tenant_id_cart_id_fkey"
+            columns: ["tenant_id", "cart_id"]
+            isOneToOne: false
+            referencedRelation: "carts"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "abandoned_carts_tenant_id_customer_id_fkey"
+            columns: ["tenant_id", "customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "abandoned_carts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "abandoned_carts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       auto_replies: {
         Row: {
           body: string
@@ -90,6 +170,187 @@ export type Database = {
           },
           {
             foreignKeyName: "auto_replies_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      broadcast_recipients: {
+        Row: {
+          address: string | null
+          broadcast_id: string
+          channel: string
+          created_at: string
+          credits: number
+          customer_id: string | null
+          error: string | null
+          id: string
+          provider_ref: string | null
+          segments: number
+          sent_at: string | null
+          skip_reason: string | null
+          status: string
+          tenant_id: string
+        }
+        Insert: {
+          address?: string | null
+          broadcast_id: string
+          channel: string
+          created_at?: string
+          credits?: number
+          customer_id?: string | null
+          error?: string | null
+          id?: string
+          provider_ref?: string | null
+          segments?: number
+          sent_at?: string | null
+          skip_reason?: string | null
+          status?: string
+          tenant_id: string
+        }
+        Update: {
+          address?: string | null
+          broadcast_id?: string
+          channel?: string
+          created_at?: string
+          credits?: number
+          customer_id?: string | null
+          error?: string | null
+          id?: string
+          provider_ref?: string | null
+          segments?: number
+          sent_at?: string | null
+          skip_reason?: string | null
+          status?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "broadcast_recipients_tenant_id_broadcast_id_fkey"
+            columns: ["tenant_id", "broadcast_id"]
+            isOneToOne: false
+            referencedRelation: "broadcasts"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "broadcast_recipients_tenant_id_customer_id_fkey"
+            columns: ["tenant_id", "customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "broadcast_recipients_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "broadcast_recipients_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      broadcasts: {
+        Row: {
+          body: string
+          channel: string
+          created_at: string
+          created_by: string | null
+          credits_spent: number
+          discount_id: string | null
+          failed_count: number
+          finished_at: string | null
+          id: string
+          name: string
+          recipient_count: number
+          scheduled_at: string | null
+          segment_definition: Json
+          segment_id: string | null
+          sent_count: number
+          short_link_id: string | null
+          skipped_count: number
+          started_at: string | null
+          status: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          body: string
+          channel?: string
+          created_at?: string
+          created_by?: string | null
+          credits_spent?: number
+          discount_id?: string | null
+          failed_count?: number
+          finished_at?: string | null
+          id?: string
+          name: string
+          recipient_count?: number
+          scheduled_at?: string | null
+          segment_definition?: Json
+          segment_id?: string | null
+          sent_count?: number
+          short_link_id?: string | null
+          skipped_count?: number
+          started_at?: string | null
+          status?: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          body?: string
+          channel?: string
+          created_at?: string
+          created_by?: string | null
+          credits_spent?: number
+          discount_id?: string | null
+          failed_count?: number
+          finished_at?: string | null
+          id?: string
+          name?: string
+          recipient_count?: number
+          scheduled_at?: string | null
+          segment_definition?: Json
+          segment_id?: string | null
+          sent_count?: number
+          short_link_id?: string | null
+          skipped_count?: number
+          started_at?: string | null
+          status?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "broadcasts_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "broadcasts_tenant_id_discount_id_fkey"
+            columns: ["tenant_id", "discount_id"]
+            isOneToOne: false
+            referencedRelation: "discounts"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "broadcasts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "broadcasts_tenant_id_fkey"
             columns: ["tenant_id"]
             isOneToOne: false
             referencedRelation: "tenants"
@@ -309,6 +570,7 @@ export type Database = {
         Row: {
           created_at: string
           customer_id: string | null
+          discount_code: string | null
           expires_at: string
           id: string
           source: string
@@ -320,6 +582,7 @@ export type Database = {
         Insert: {
           created_at?: string
           customer_id?: string | null
+          discount_code?: string | null
           expires_at?: string
           id?: string
           source?: string
@@ -331,6 +594,7 @@ export type Database = {
         Update: {
           created_at?: string
           customer_id?: string | null
+          discount_code?: string | null
           expires_at?: string
           id?: string
           source?: string
@@ -1022,6 +1286,156 @@ export type Database = {
           },
           {
             foreignKeyName: "customers_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      discount_redemptions: {
+        Row: {
+          amount_centavos: number
+          created_at: string
+          customer_id: string | null
+          discount_id: string
+          id: string
+          order_id: string
+          phone: string
+          tenant_id: string
+        }
+        Insert: {
+          amount_centavos: number
+          created_at?: string
+          customer_id?: string | null
+          discount_id: string
+          id?: string
+          order_id: string
+          phone: string
+          tenant_id: string
+        }
+        Update: {
+          amount_centavos?: number
+          created_at?: string
+          customer_id?: string | null
+          discount_id?: string
+          id?: string
+          order_id?: string
+          phone?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "discount_redemptions_tenant_id_discount_id_fkey"
+            columns: ["tenant_id", "discount_id"]
+            isOneToOne: false
+            referencedRelation: "discounts"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "discount_redemptions_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "discount_redemptions_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "discount_redemptions_tenant_id_order_id_fkey"
+            columns: ["tenant_id", "order_id"]
+            isOneToOne: false
+            referencedRelation: "orders"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
+      discounts: {
+        Row: {
+          applies_to: Json
+          code: string | null
+          created_at: string
+          created_by: string | null
+          ends_at: string | null
+          id: string
+          is_active: boolean
+          is_auto: boolean
+          kind: string
+          max_discount_centavos: number | null
+          min_subtotal_centavos: number
+          name: string
+          starts_at: string | null
+          tenant_id: string
+          updated_at: string
+          usage_limit: number | null
+          usage_limit_per_customer: number | null
+          used_count: number
+          value: number
+        }
+        Insert: {
+          applies_to?: Json
+          code?: string | null
+          created_at?: string
+          created_by?: string | null
+          ends_at?: string | null
+          id?: string
+          is_active?: boolean
+          is_auto?: boolean
+          kind: string
+          max_discount_centavos?: number | null
+          min_subtotal_centavos?: number
+          name: string
+          starts_at?: string | null
+          tenant_id: string
+          updated_at?: string
+          usage_limit?: number | null
+          usage_limit_per_customer?: number | null
+          used_count?: number
+          value?: number
+        }
+        Update: {
+          applies_to?: Json
+          code?: string | null
+          created_at?: string
+          created_by?: string | null
+          ends_at?: string | null
+          id?: string
+          is_active?: boolean
+          is_auto?: boolean
+          kind?: string
+          max_discount_centavos?: number | null
+          min_subtotal_centavos?: number
+          name?: string
+          starts_at?: string | null
+          tenant_id?: string
+          updated_at?: string
+          usage_limit?: number | null
+          usage_limit_per_customer?: number | null
+          used_count?: number
+          value?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "discounts_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "discounts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "discounts_tenant_id_fkey"
             columns: ["tenant_id"]
             isOneToOne: false
             referencedRelation: "tenants"
@@ -3668,6 +4082,86 @@ export type Database = {
           },
         ]
       }
+      short_link_clicks: {
+        Row: {
+          clicked_at: string
+          id: number
+          link_id: string
+          recipient_id: string | null
+        }
+        Insert: {
+          clicked_at?: string
+          id?: never
+          link_id: string
+          recipient_id?: string | null
+        }
+        Update: {
+          clicked_at?: string
+          id?: never
+          link_id?: string
+          recipient_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "short_link_clicks_link_id_fkey"
+            columns: ["link_id"]
+            isOneToOne: false
+            referencedRelation: "short_links"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      short_links: {
+        Row: {
+          click_count: number
+          created_at: string
+          expires_at: string | null
+          id: string
+          slug: string
+          source_id: string | null
+          source_type: string
+          target: string
+          tenant_id: string
+        }
+        Insert: {
+          click_count?: number
+          created_at?: string
+          expires_at?: string | null
+          id?: string
+          slug: string
+          source_id?: string | null
+          source_type?: string
+          target: string
+          tenant_id: string
+        }
+        Update: {
+          click_count?: number
+          created_at?: string
+          expires_at?: string | null
+          id?: string
+          slug?: string
+          source_id?: string | null
+          source_type?: string
+          target?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "short_links_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "short_links_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       sms_credit_entries: {
         Row: {
           balance_after: number
@@ -4770,6 +5264,27 @@ export type Database = {
       }
     }
     Functions: {
+      abandoned_cart_record_reminder: {
+        Args: { p_discount_id?: string; p_id: string }
+        Returns: undefined
+      }
+      abandoned_carts_due: {
+        Args: { p_tenant_id?: string }
+        Returns: {
+          cart_id: string
+          customer_id: string
+          id: string
+          phone: string
+          step: number
+          subtotal_centavos: number
+          tenant_id: string
+        }[]
+      }
+      abandoned_carts_report: {
+        Args: { p_days?: number; p_tenant_id: string }
+        Returns: Json
+      }
+      abandoned_carts_sweep: { Args: { p_tenant_id?: string }; Returns: Json }
       accept_invitation: {
         Args: { p_token: string }
         Returns: {
@@ -4834,6 +5349,64 @@ export type Database = {
         Args: { p_on_hand: number; p_reserved: number }
         Returns: number
       }
+      broadcast_channel_for: {
+        Args: { p_channel?: string; p_customer_id: string }
+        Returns: string
+      }
+      broadcast_claim_next: { Args: { p_broadcast_id: string }; Returns: Json }
+      broadcast_preview: {
+        Args: {
+          p_body: string
+          p_channel?: string
+          p_definition: Json
+          p_discount_id?: string
+          p_tenant_id: string
+        }
+        Returns: Json
+      }
+      broadcast_record_send: {
+        Args: {
+          p_body?: string
+          p_error?: string
+          p_provider_ref?: string
+          p_recipient_id: string
+          p_status: string
+        }
+        Returns: undefined
+      }
+      broadcast_render: {
+        Args: { p_body: string; p_code: string; p_link: string; p_name: string }
+        Returns: string
+      }
+      broadcast_report: {
+        Args: { p_broadcast_id: string; p_window_days?: number }
+        Returns: Json
+      }
+      broadcast_save: {
+        Args: {
+          p_body: string
+          p_channel?: string
+          p_definition: Json
+          p_discount_id?: string
+          p_id?: string
+          p_name: string
+          p_scheduled_at?: string
+          p_tenant_id: string
+        }
+        Returns: string
+      }
+      broadcast_start: { Args: { p_broadcast_id: string }; Returns: Json }
+      broadcasts_due: {
+        Args: never
+        Returns: {
+          id: string
+          tenant_id: string
+        }[]
+      }
+      broadcasts_list: {
+        Args: { p_limit?: number; p_tenant_id: string }
+        Returns: Json
+      }
       buyer_risk_contribute: {
         Args: {
           p_delivered: number
@@ -4865,6 +5438,10 @@ export type Database = {
       }
       cart_add_item: {
         Args: { p_qty?: number; p_token: string; p_variant_id: string }
+        Returns: Json
+      }
+      cart_apply_discount: {
+        Args: { p_code: string; p_token: string }
         Returns: Json
       }
       cart_create: {
@@ -5083,6 +5660,20 @@ export type Database = {
           event: string
           locale: string
         }[]
+      }
+      discount_auto_best: {
+        Args: { p_shipping?: number; p_subtotal: number; p_tenant_id: string }
+        Returns: Json
+      }
+      discount_evaluate: {
+        Args: {
+          p_code: string
+          p_phone?: string
+          p_shipping?: number
+          p_subtotal: number
+          p_tenant_id: string
+        }
+        Returns: Json
       }
       has_tenant_role: {
         Args: {
@@ -5559,6 +6150,19 @@ export type Database = {
         Args: { p_limit?: number; p_stale_after?: string }
         Returns: Json
       }
+      short_link_create: {
+        Args: {
+          p_source_id?: string
+          p_source_type?: string
+          p_target: string
+          p_tenant_id: string
+        }
+        Returns: Json
+      }
+      short_link_follow: {
+        Args: { p_recipient?: string; p_slug: string }
+        Returns: Json
+      }
       sms_credit_balance: { Args: { p_tenant_id: string }; Returns: number }
       sms_credit_balance_raw: { Args: { p_tenant_id: string }; Returns: number }
       sms_credit_move: {
@@ -5575,6 +6179,7 @@ export type Database = {
         Args: { p_event: string; p_order_id: string; p_root_url: string }
         Returns: Json
       }
+      sms_segments: { Args: { p_body: string }; Returns: number }
       social_account_connect: {
         Args: {
           p_ig_user_id?: string

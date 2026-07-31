@@ -62,6 +62,31 @@ describe('plural keys', () => {
     }
   })
 
+  it('tl gives _one and _other the same text, for every plural key', () => {
+    // Asserting one key by hand is what let seventeen others through. CLDR's
+    // rule for `fil` sends everything except counts ending in 4, 6 or 9 to
+    // `one`, so a split pair does not read as "singular vs plural" — it reads as
+    // "790 credit" beside "6 credits", which is worse than either.
+    const strings = flatten(resources.tl.common)
+    const split = Object.keys(strings)
+      .filter((key) => key.endsWith('_one'))
+      .filter((key) => strings[key.replace(/_one$/, '_other')] !== strings[key])
+    expect(split).toEqual([])
+  })
+
+  it('tl renders the same noun at 1, at 6 and at 790', () => {
+    // The rendering half of the assertion above: 6 is one of the few counts CLDR
+    // routes to `other` in fil, and 790 is the one a payday broadcast shows.
+    const i18n = createI18nInstance('tl')
+    const keys = ['broadcasts.costCredits', 'customers.listTitle', 'orders.itemCount'] as const
+    for (const key of keys) {
+      const shapes = new Set(
+        [1, 6, 790].map((count) => i18n.t(key, { count }).replace(String(count), '#')),
+      )
+      expect([...shapes], key).toHaveLength(1)
+    }
+  })
+
   it('no key resolves to its own name — the fallback signature of a bad lookup', () => {
     const i18n = createI18nInstance('en')
     const keys = [

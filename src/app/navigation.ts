@@ -4,6 +4,7 @@ import {
   Boxes,
   CreditCard,
   LayoutDashboard,
+  Megaphone,
   MessageCircle,
   Package,
   Radio,
@@ -63,6 +64,7 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { to: '/customers', labelKey: 'customers', icon: Users, phase: 15 },
       { to: '/inbox', labelKey: 'inbox', icon: MessageCircle, phase: 14 },
+      { to: '/broadcasts', labelKey: 'broadcasts', icon: Megaphone, phase: 16 },
       { to: '/analytics', labelKey: 'analytics', icon: BarChart3, phase: 18 },
       { to: '/settings', labelKey: 'settings', icon: Settings, phase: 2 },
     ],

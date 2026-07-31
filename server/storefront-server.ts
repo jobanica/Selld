@@ -32,6 +32,7 @@ import { CART_COOKIE, cartCookie, isSecureRequest } from './cookies'
 import { serveCourierRoutes } from './courier-routes'
 import { serveXenditWebhook } from './payment-webhook'
 import { serveLiveWebhook } from './live-routes'
+import { serveBroadcastRoutes, serveShortLink } from './broadcast-routes'
 import { serveSocialRoutes, serveSocialWebhook } from './social-routes'
 import { serveCourierWebhook } from './tracking'
 import { readSupabaseConfig, rpc, type SupabaseConfig } from './supabase-rpc'
@@ -309,6 +310,13 @@ async function handle(
 
   // Connecting a Page, and the OAuth redirect Facebook sends the seller back to.
   if (await serveSocialRoutes(request, response, url, storeRootUrl(url))) return
+
+  // Sending a broadcast, and the short links it carries. Both before surface
+  // routing: a short link is tapped from an SMS on whatever host the seller's
+  // store answers on, and the send is a dashboard action that needs the
+  // server-held service role.
+  if (await serveBroadcastRoutes(request, response, url)) return
+  if (await serveShortLink(response, url)) return
 
   // `.localhost` subdomains resolve to 127.0.0.1 in every modern browser, so
   // `rheas-finds.localhost:5174` exercises the real subdomain path in dev.
