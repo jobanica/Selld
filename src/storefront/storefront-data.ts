@@ -1,4 +1,5 @@
 import { fromDb, type Centavos } from '@/lib/money'
+import type { OnlineMethod } from '@/lib/payments/online-methods'
 
 /**
  * The storefront's read model — the exact shape the `storefront_*` RPCs return.
@@ -19,6 +20,31 @@ export interface StoreTheme {
   customCss?: string | null
 }
 
+/**
+ * The week a store publishes, as `storefront_store_policies` returns it.
+ *
+ * `openNow` is decided in SQL and travels in the payload. Recomputing it here
+ * would mean the server rendered one answer and the client hydrated with another
+ * whenever a minute ticked in between, and on this surface a hydration mismatch
+ * throws away the entire server-rendered tree — the `cartCount` lesson, applied
+ * before it could be learned twice.
+ */
+export interface StoreHoursPublic {
+  /** Monday-first, seven entries. `null` is a closed day. */
+  days: ({ open: string; close: string } | null)[]
+  note: string
+  openNow: boolean
+}
+
+/** How a store can be paid, as the buyer needs to know it. */
+export interface StorePayments {
+  cod: boolean
+  /** True only when the seller switched it on *and* an account can take money. */
+  online: boolean
+  /** Empty whenever `online` is false. The same list checkout renders buttons for. */
+  methods: OnlineMethod[]
+}
+
 export interface Store {
   id: string
   name: string
@@ -28,6 +54,9 @@ export interface Store {
   brandColor: string | null
   locale: 'en' | 'tl'
   theme: StoreTheme
+  /** Null when the seller has not published any — never a default week. */
+  hours: StoreHoursPublic | null
+  payments: StorePayments
 }
 
 export interface ProductCard {

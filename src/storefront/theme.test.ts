@@ -19,6 +19,8 @@ function store(overrides: Partial<Store> = {}): Store {
     brandColor: null,
     locale: 'en',
     theme: {},
+    hours: null,
+    payments: { cod: true, online: false, methods: [] },
     ...overrides,
   }
 }

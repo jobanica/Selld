@@ -150,24 +150,19 @@ export interface CheckoutFieldError {
 /**
  * Online methods this store can actually take right now.
  *
- * Empty when the seller has not connected a payment account, and the checkout page
- * renders COD alone in that case. Deliberately derived from the store's live
- * capability rather than from a settings flag: offering a GCash button that the
- * server will refuse is the phase-6 mistake in a new costume.
+ * Empty when the seller switched online payment off, and empty when they have
+ * not connected a payment account — both, because either one alone would offer a
+ * GCash button the server then refuses, which is the phase-6 mistake in a new
+ * costume. `storefront_store_policies` is the single place that decides, and the
+ * "we accept" strip on the shop reads the same answer these buttons do.
+ *
+ * The vocabulary itself now lives in `src/lib/payments`, so the settings
+ * catalogue can name it without the dashboard importing buyer code.
  */
-export type OnlineMethod = 'gcash' | 'maya' | 'grabpay' | 'qrph' | 'card'
+import type { OnlineMethod } from '@/lib/payments/online-methods'
 
-export const ONLINE_METHODS: readonly OnlineMethod[] = [
-  'gcash',
-  'maya',
-  'grabpay',
-  'qrph',
-  'card',
-]
-
-export function isOnlineMethod(value: string): value is OnlineMethod {
-  return (ONLINE_METHODS as readonly string[]).includes(value)
-}
+export type { OnlineMethod }
+export { ONLINE_METHODS, isOnlineMethod } from '@/lib/payments/online-methods'
 
 /**
  * One scan on a parcel's timeline.

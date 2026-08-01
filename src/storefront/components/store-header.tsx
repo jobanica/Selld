@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next'
 import { storeHref } from '@/lib/tenant/resolve-tenant'
 
 import { useStorageUrl, useStoreHref, useStorefront } from '../use-storefront'
+import { StoreOpenBadge } from './store-info'
 
 /**
  * Store header.
@@ -54,6 +55,11 @@ export function StoreHeader({
             {store.name}
           </span>
         </a>
+
+        {/* Next to the name, because "open pa po kayo?" is the question a buyer
+            asks before anything else — and it renders nothing at all for a store
+            that has not published hours. */}
+        <StoreOpenBadge hours={store.hours} />
 
         {showSearch && (
           <form action={href('/')} method="get" role="search" className="order-3 flex w-full min-w-0 basis-full sm:order-none sm:ml-auto sm:w-auto sm:basis-auto sm:max-w-md sm:flex-1">

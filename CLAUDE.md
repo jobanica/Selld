@@ -390,7 +390,10 @@ one new file plus one registry line, and zero lines of order logic.
 - **New `tenant_settings` keys go in `src/lib/settings/keys.ts` first.** The table
   is key/value, so nothing in the database stops a typo'd key; that file is the
   compensating control, and its parsers make a malformed value fall back to a
-  default rather than reach pricing logic as `NaN`.
+  default rather than reach pricing logic as `NaN`. `payments.methods` shipped in
+  phase 8 seeded by a trigger and read by SQL but *absent from that file* for
+  twelve phases, which is the exact hole it exists to close — if a migration
+  seeds a key, the same commit adds it here.
 - **Never require a province.** NCR and 3 independent cities have none. Use
   `isAddressComplete()` and `PhAddressPicker`, which handle it.
 - **Denormalised `tenant_id` needs a composite FK, not a trigger.** Give the parent
@@ -857,6 +860,51 @@ one new file plus one registry line, and zero lines of order logic.
   item line totals against order grand totals, which carry shipping and COD fees
   no line accounts for — so a store with perfect cost data still read 97% and
   looked permanently short of something.
+- **A setting nothing reads is a lie with a switch on it.**
+  `payments.online_enabled` was seeded by the tenant trigger, written by the
+  onboarding wizard, typed in `keys.ts` and honoured by nobody:
+  `storefront_payment_methods` asked only whether an Xendit account was enabled,
+  so a seller who said "not yet" was offered GCash at checkout anyway. Thirteen
+  phases missed it because it only bites once a store has a live account. When a
+  key is added, the same commit has to point at the thing that reads it.
+- **A `SELECT` that shows a capability must ask the same question the write
+  does.** The fix above put both behind one function — `storefront_store_policies`
+  now answers "how can this store be paid", and both the shop's "we accept" strip
+  and the checkout buttons read it. Two queries applying the same rule from two
+  places is the setup for them disagreeing about what a buyer is offered.
+- **Anything derived from *now* on the storefront is decided in SQL.** The
+  surface is server-rendered and hydration is deferred to idle-after-load, so a
+  client that recomputed "open now" would disagree with the server whenever a
+  minute ticked in between — and a hydration mismatch here discards the whole
+  tree (the `cartCount` lesson). `openNow` travels in the payload; the TypeScript
+  in `src/lib/store-hours.ts` is pure `HH:MM` string work, identical on both
+  sides by construction. For the same reason `formatTime12()` is hand-rolled:
+  recent ICU puts a narrow no-break space before the meridiem and older ICU a
+  plain one, and Node and the browser can disagree on that one character.
+- **A grid item's `min-width` is `auto`, so the column grows to its widest
+  child.** The hours editor overflowed a 390px page by 23px however narrow its
+  inputs were told to be, because the fix belonged on the *column*, not the
+  input. `min-w-0` on both halves of any `grid`/`flex` that contains something
+  unshrinkable. Related: `Input` carries `text-base` on mobile (iOS zooms
+  anything smaller), which gives `<input type="time">` a ~145px intrinsic width —
+  put `min-w-0 flex-1` on a wrapper, not on the input.
+- **`truncate` on a flex *container* clips the wrong child.** It clipped the
+  "Currently open" badge and the role beside a store name rather than the long
+  name itself, so the row read `Rhea's Finds ✓ O…`. Put `truncate` on the one
+  span that is allowed to be long.
+- **`as unknown as Store` in a fixture is a fixture that has stopped testing.**
+  The tracking-page store cast stood in for `customDomain` and then went on
+  quietly standing in for every field added afterwards; when `hours` and
+  `payments` joined the type, six tests failed at *runtime* with "cannot read
+  properties of undefined" instead of at the compiler. If a fixture needs a cast
+  to compile, the fixture is wrong.
+- **The QR encoder is a dependency on purpose.** Reed-Solomon over GF(256), eight
+  mask patterns and a BCH format field, whose failure mode is a code that renders
+  beautifully and scans to nothing — discovered after the seller has printed two
+  hundred. `src/lib/qr.ts` wraps `qrcode-generator` (52KB, zero deps, MIT) and
+  `src/lib/qr.test.ts` puts a real decoder (`jsqr`, a devDependency) on the other
+  end. It lands in the dashboard chunk; nothing under `src/storefront/**` may
+  import it.
 
 ## Package manager
 

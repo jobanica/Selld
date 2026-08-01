@@ -16,6 +16,8 @@ function store(overrides: Partial<Store> = {}): Store {
     brandColor: '#b0245f',
     locale: 'tl',
     theme: { hero: { headline: 'Authentic skincare', subheadline: 'Legit items, COD available.' } },
+    hours: null,
+    payments: { cod: true, online: false, methods: [] },
     ...overrides,
   }
 }

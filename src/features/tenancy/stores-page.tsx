@@ -1,4 +1,4 @@
-import { Check, ExternalLink, Plus, Store } from 'lucide-react'
+import { Check, ChevronDown, ExternalLink, Plus, Settings2, Store } from 'lucide-react'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { StorePanel } from '@/features/tenancy/store-panel'
 import { createTenant } from '@/features/tenancy/tenancy-api'
 import { useTenant } from '@/features/tenancy/use-tenant'
 import { env } from '@/lib/env'
@@ -39,6 +40,9 @@ export function StoresPage() {
   const [slugEdited, setSlugEdited] = useState(false)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // One panel at a time. Two open QR codes on a 390px screen is a scroll, not a
+  // comparison, and nothing here is worth comparing side by side.
+  const [expanded, setExpanded] = useState<string | null>(null)
 
   const effectiveSlug = slugEdited ? slug : slugify(name)
   const slugProblem =
@@ -94,14 +98,16 @@ export function StoresPage() {
             rootDomain: env.rootDomain,
             mode: env.storeUrlMode,
           })
+          const isOpen = expanded === tenant.id
           return (
             <li key={tenant.id}>
               <div
                 className={cn(
-                  'flex flex-wrap items-center gap-3 rounded-xl border p-4',
+                  'rounded-xl border',
                   isActive ? 'border-primary/40 bg-primary/5' : 'bg-card',
                 )}
               >
+              <div className="flex flex-wrap items-center gap-3 p-4">
                 <span
                   className={cn(
                     'grid size-10 shrink-0 place-items-center rounded-lg',
@@ -111,9 +117,14 @@ export function StoresPage() {
                   <Store className="size-5" aria-hidden="true" />
                 </span>
 
+                {/* `truncate` on the flex *container* clipped the badge and the
+                    role rather than the long text beside them — at 390px the
+                    store read "Rhea's Finds ✓ O…" and "rheas-finds.selld.ph ·
+                    O…". Clip the one thing that is allowed to be long; let
+                    everything else keep its width. */}
                 <div className="min-w-0 flex-1">
-                  <p className="flex items-center gap-2 truncate font-semibold">
-                    {tenant.name}
+                  <p className="flex min-w-0 items-center gap-2 font-semibold">
+                    <span className="truncate">{tenant.name}</span>
                     {isActive && (
                       <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-primary/15 px-2 py-0.5 text-[11px] font-medium text-primary">
                         <Check className="size-3" aria-hidden="true" />
@@ -121,12 +132,16 @@ export function StoresPage() {
                       </span>
                     )}
                   </p>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {address} · {t(`tenant.role.${tenant.role}`)}
+                  <p className="flex min-w-0 gap-1 text-xs text-muted-foreground">
+                    <span className="truncate">{address}</span>
+                    <span className="shrink-0">· {t(`tenant.role.${tenant.role}`)}</span>
                   </p>
                 </div>
 
-                <div className="flex shrink-0 items-center gap-2">
+                {/* Its own line on a phone. Sharing one with the store name left
+                    about 120px for the name, so "Rhea's Finds" rendered as "R…"
+                    — the one word on the row a seller is actually looking for. */}
+                <div className="flex w-full shrink-0 items-center gap-2 sm:w-auto">
                   <a
                     href={`https://${address}`}
                     target="_blank"
@@ -142,6 +157,33 @@ export function StoresPage() {
                     </Button>
                   )}
                 </div>
+
+                {/* A disclosure rather than always-open: a seller with four
+                    stores would otherwise scroll past four QR codes and four
+                    week-long schedules to reach the fourth store's name. The
+                    panel is only mounted while it is open, so the settings query
+                    behind it costs nothing until asked for. */}
+                <button
+                  type="button"
+                  aria-expanded={isOpen}
+                  aria-controls={`store-panel-${tenant.id}`}
+                  onClick={() => { setExpanded(isOpen ? null : tenant.id) }}
+                  className="inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-md text-sm font-medium text-muted-foreground hover:bg-accent hover:text-foreground sm:w-auto"
+                >
+                  <Settings2 className="size-4" aria-hidden="true" />
+                  {t('tenant.storesManage')}
+                  <ChevronDown
+                    aria-hidden="true"
+                    className={cn('size-4 transition-transform', isOpen && 'rotate-180')}
+                  />
+                </button>
+              </div>
+
+              {isOpen && (
+                <div id={`store-panel-${tenant.id}`}>
+                  <StorePanel tenant={tenant} address={address} />
+                </div>
+              )}
               </div>
             </li>
           )

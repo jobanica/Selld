@@ -30,7 +30,7 @@ export function ProductPage({ payload }: { payload: ProductPayload }) {
   const href = useStoreHref()
   const { t } = useTranslation()
   const toUrl = useStorageUrl()
-  const { storageOrigin } = useStorefront()
+  const { storageOrigin, store } = useStorefront()
   const { product, images, options, variants, related } = payload
 
   // Hooks first, unconditionally. The `product === null` guard below used to sit
@@ -218,7 +218,10 @@ export function ProductPage({ payload }: { payload: ProductPayload }) {
             )}
 
             <dl className="grid gap-1 text-xs text-muted-foreground">
-              {product.isCodAllowed && (
+              {/* Both halves have to agree. The product flag alone advertised
+                  cash on delivery on stores that had switched COD off at the
+                  till, which is a promise the checkout then refuses. */}
+              {product.isCodAllowed && store.payments.cod && (
                 <div className="flex gap-1.5">
                   <dt className="font-medium text-foreground">{t('storefront.codLabel')}</dt>
                   <dd>{t('storefront.codAvailable')}</dd>

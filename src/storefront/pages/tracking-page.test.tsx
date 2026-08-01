@@ -43,15 +43,39 @@ const COURIER_STATUSES = [
   'unknown',
 ] as const
 
+/*
+ * No `as unknown as Store` here any more.
+ *
+ * The cast used to stand in for `customDomain`, and it went on quietly standing
+ * in for every field added since — so when `hours` and `payments` joined the
+ * type, six tests failed at runtime with "cannot read properties of undefined"
+ * rather than at the compiler, which is where a fixture is supposed to fail. A
+ * fixture that opts out of the type is a fixture that stops testing the thing.
+ */
 const STORE: Store = {
   id: 'store-1',
   name: "Rhea's Finds",
   slug: 'rheas-finds',
+  customDomain: null,
   logoPath: null,
   brandColor: '#b91c5c',
   locale: 'tl',
   theme: {},
-} as unknown as Store
+  hours: {
+    days: [
+      { open: '09:00', close: '18:00' },
+      { open: '09:00', close: '18:00' },
+      { open: '09:00', close: '18:00' },
+      { open: '09:00', close: '18:00' },
+      { open: '09:00', close: '18:00' },
+      { open: '09:00', close: '18:00' },
+      null,
+    ],
+    note: '',
+    openNow: true,
+  },
+  payments: { cod: true, online: false, methods: [] },
+}
 
 function payload(overrides: Partial<TrackingPayload> = {}): TrackingPayload {
   return {

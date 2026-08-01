@@ -7060,6 +7060,7 @@ export type Database = {
         }
         Returns: boolean
       }
+      hhmm_minutes: { Args: { p_value: string }; Returns: number }
       image_widths_are_sane: { Args: { p_widths: number[] }; Returns: boolean }
       impersonate_begin: {
         Args: { p_actor_id: string; p_reason: string; p_tenant_id: string }
@@ -7804,6 +7805,10 @@ export type Database = {
         Returns: Json
       }
       storefront_store_json: { Args: { p_tenant_id: string }; Returns: Json }
+      storefront_store_policies: {
+        Args: { p_tenant_id: string }
+        Returns: Json
+      }
       storefront_tenant_id: {
         Args: { p_domain?: string; p_slug?: string }
         Returns: string

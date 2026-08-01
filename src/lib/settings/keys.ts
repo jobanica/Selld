@@ -14,6 +14,8 @@
  */
 
 import { centavos, type Bps, type Centavos } from '@/lib/money'
+import { isOnlineMethod, ONLINE_METHODS, type OnlineMethod } from '@/lib/payments/online-methods'
+import { DEFAULT_STORE_HOURS, parseStoreHours, type StoreHours } from '@/lib/store-hours'
 
 export type SettingKey =
   | 'onboarding.step'
@@ -22,6 +24,8 @@ export type SettingKey =
   | 'payments.cod_fee_centavos'
   | 'payments.cod_fee_bps'
   | 'payments.online_enabled'
+  | 'payments.methods'
+  | 'store.hours'
   | 'orders.number_prefix'
   | 'orders.auto_confirm'
   | 'catalog.presets'
@@ -43,6 +47,27 @@ export interface TenantSettings {
   'payments.cod_fee_bps': Bps
   /** Online payments require Xendit, which lands in phase 8. */
   'payments.online_enabled': boolean
+  /**
+   * Which online wallets and cards this store offers, of the five Xendit carries.
+   *
+   * Seeded by `seed_tenant_defaults()` since phase 8 and read by
+   * `storefront_payment_methods()` ever since — but absent from this file until
+   * now, which is exactly the hole this catalogue exists to close. A key the
+   * database writes and the client cannot name is a key nothing type-checks.
+   *
+   * The list is intersected with what the seller's payment account can actually
+   * take, so switching one off here removes a button and switching one on never
+   * invents one.
+   */
+  'payments.methods': OnlineMethod[]
+  /**
+   * When the seller is at their phone. See `src/lib/store-hours.ts`.
+   *
+   * Opt-in: a store that never set hours publishes none. The alternative — a
+   * default week nobody chose — tells a buyer a shop is closed at the exact
+   * moment they were ready to pay.
+   */
+  'store.hours': StoreHours
   /** Prefix on order numbers, e.g. `RF-`. Sellers read these aloud. */
   'orders.number_prefix': string
   'orders.auto_confirm': boolean
@@ -104,6 +129,10 @@ export const SETTING_DEFAULTS: TenantSettings = {
   'payments.cod_fee_centavos': centavos(0),
   'payments.cod_fee_bps': 0 as Bps,
   'payments.online_enabled': false,
+  // Same list `seed_tenant_defaults()` writes. Two places, one value, and the
+  // test below pins them together.
+  'payments.methods': [...ONLINE_METHODS],
+  'store.hours': DEFAULT_STORE_HOURS,
   'orders.number_prefix': '',
   'orders.auto_confirm': false,
   'catalog.presets': [],
@@ -141,6 +170,11 @@ const PARSERS: { [K in SettingKey]: Parser<K> } = {
       ? (raw as Bps)
       : undefined,
   'payments.online_enabled': (raw) => (typeof raw === 'boolean' ? raw : undefined),
+  'payments.methods': (raw) =>
+    Array.isArray(raw) && raw.every((item) => typeof item === 'string' && isOnlineMethod(item))
+      ? (raw as OnlineMethod[])
+      : undefined,
+  'store.hours': parseStoreHours,
   'analytics.subscription_centavos': (raw) =>
     typeof raw === 'number' && Number.isSafeInteger(raw) && raw >= 0
       ? (raw as Centavos)

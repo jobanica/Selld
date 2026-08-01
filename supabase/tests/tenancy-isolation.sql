@@ -5206,6 +5206,111 @@ $$;
 
 reset role;
 
+-- ---------------------------------------------------------------------------
+-- Store hours and the payment strip
+-- ---------------------------------------------------------------------------
+-- `storefront_store_policies` is a SECURITY DEFINER granted to anon that reads
+-- two tables anon has no grant on — `tenant_settings` and `payment_accounts` —
+-- so what it is allowed to say is the whole of its security argument. It may say
+-- a published week, "we take COD", and a whitelist of method names. Anything
+-- else out of either table is a leak, and the uuid it takes is attacker-supplied.
+\echo ''
+\echo '=== Store hours and payment display'
+
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+  insert into public.tenant_settings (tenant_id, key, value) values
+    (i.rhea_tenant, 'store.hours', jsonb_build_object(
+      'enabled', true,
+      'days', (select jsonb_agg(case when d < 6
+                                     then jsonb_build_object('open','09:00','close','18:00')
+                                     else 'null'::jsonb end order by d)
+               from generate_series(0,6) d),
+      'note', 'Sarado tuwing Linggo')),
+    (i.rhea_tenant, 'payments.online_enabled', 'false'::jsonb)
+  on conflict (tenant_id, key) do update set value = excluded.value;
+end;
+$$;
+
+set local role anon;
+select tests.logout();
+
+do $$
+declare
+  i        record;
+  v_store  jsonb;
+begin
+  select * into i from tests.ids;
+
+  -- The route in, and the only one. A buyer cannot read the settings row that
+  -- backs any of this.
+  perform tests.rejects($q$ select count(*) from public.tenant_settings $q$,
+    'anon has no grant on tenant_settings, hours included');
+
+  v_store := public.storefront_home('rheas-finds') -> 'store';
+
+  perform tests.ok(v_store -> 'hours' <> 'null'::jsonb,
+    'published hours reach the storefront payload');
+  perform tests.eq(v_store #>> '{hours,note}', 'Sarado tuwing Linggo',
+    'and so does the note under them');
+  perform tests.eq(jsonb_array_length(v_store #> '{hours,days}'), 7,
+    'a week is seven days, or the client cannot index it');
+  perform tests.ok(jsonb_typeof(v_store #> '{hours,openNow}') = 'boolean',
+    'openNow is decided server-side, so the client never recomputes it');
+
+  -- Hard rule from phase 8, now actually enforced: the seller's switch decides,
+  -- and the account only ever narrows it further.
+  perform tests.eq(v_store #> '{payments,online}', 'false'::jsonb,
+    'online payments are off when the seller says so');
+  perform tests.eq(v_store #> '{payments,methods}', '[]'::jsonb,
+    'and no method is offered while they are off');
+  perform tests.eq(v_store #> '{payments,methods}',
+    public.storefront_payment_methods('rheas-finds', null),
+    'the storefront strip and the checkout buttons are the same list');
+  perform tests.eq(v_store #> '{payments,cod}', 'true'::jsonb,
+    'COD is on unless the seller turned it off');
+
+  -- The uuid is attacker-suppliable, so the function answers for publicly
+  -- trading stores and nothing else.
+  perform tests.eq(
+    public.storefront_store_policies('00000000-0000-0000-0000-000000000000'::uuid) -> 'hours',
+    'null'::jsonb,
+    'an unknown tenant id gets an empty answer rather than a probe result');
+  perform tests.eq(public.storefront_store_policies(null) #> '{payments,methods}', '[]'::jsonb,
+    'and so does a null one');
+
+  -- Malformed data in a key/value table must not take a storefront down.
+  perform tests.ok(public.storefront_payment_methods('no-such-store', null) = '[]'::jsonb,
+    'an unknown store is an empty list, not an error');
+end;
+$$;
+
+reset role;
+
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+  -- Publishing is opt-in: switching `enabled` off removes the week entirely
+  -- rather than leaving a stale one on the shop.
+  update public.tenant_settings
+     set value = jsonb_set(value, '{enabled}', 'false'::jsonb)
+   where tenant_id = i.rhea_tenant and key = 'store.hours';
+end;
+$$;
+
+set local role anon;
+do $$
+begin
+  perform tests.eq(public.storefront_home('rheas-finds') #> '{store,hours}', 'null'::jsonb,
+    'hours the seller has not published are absent, not defaulted');
+end;
+$$;
+
+reset role;
+
 -- Report the assertion count, and fail loudly if the file somehow ran with far
 -- fewer checks than expected (e.g. a section silently skipped).
 do $$
