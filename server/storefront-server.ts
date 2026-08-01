@@ -1272,10 +1272,28 @@ function sendHtml(
   response.writeHead(status, {
     'Content-Type': 'text/html; charset=utf-8',
     ...(encoding === null ? {} : { 'Content-Encoding': encoding }),
-    Vary: 'Accept-Encoding',
-    // The document is public and identical for every buyer, so a CDN can serve
-    // it. `s-maxage` lets the edge cache it while `max-age=0` keeps the browser
-    // revalidating, so a seller's price change is visible immediately on reload.
+    /*
+     * `Cookie` is in the Vary, and it is load-bearing.
+     *
+     * The cache key is computed at the edge, *before* this function runs, and by
+     * default it ignores cookies — so a buyer with a cart was handed the
+     * cookie-less document some earlier visitor had populated the cache with, and
+     * the cart badge read 0 no matter what the server would have said. Confirmed
+     * on the deployment: `x-vercel-cache: HIT` with an empty badge, and the same
+     * URL with a cache-buster returning `no-store, private` and "Cart, 1 item".
+     *
+     * The cost is bounded and lands in the right place: a request with no cookies
+     * — every first visit, every crawler, every link opened from Messenger, which
+     * is the traffic the LCP budget exists for — still shares one cache entry.
+     * A buyer who has a cart misses the edge and gets their own count, which is
+     * the whole point. Nothing is stored under their key either, because the
+     * response they get is `no-store`.
+     */
+    Vary: 'Accept-Encoding, Cookie',
+    // The document is public and identical for every buyer *without a cart*, so a
+    // CDN can serve it. `s-maxage` lets the edge cache it while `max-age=0` keeps
+    // the browser revalidating, so a seller's price change is visible immediately
+    // on reload.
     'Cache-Control':
       status === 200
         ? 'public, max-age=0, s-maxage=60, stale-while-revalidate=300'
