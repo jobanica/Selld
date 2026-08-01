@@ -556,7 +556,11 @@ one new file plus one registry line, and zero lines of order logic.
   `alter default privileges in schema public grant all on tables/sequences/functions
   to anon, authenticated, service_role`, so every object these migrations create is
   handed to both client roles at CREATE time, before the migration's own narrow
-  grant runs. It defeats three things at once: the column lists that keep
+  grant runs. **This is not a CI-image quirk** — it was confirmed on a hosted
+  project created in August 2026, whose `postgres` default ACL in `public` grants
+  `arwdDxtm` on new tables and `X` on new functions to both roles. The local CLI
+  stack is the odd one out: it ships the narrowed `Dxtm`, which is why twenty
+  phases of local testing said everything was fine. It defeats three things at once: the column lists that keep
   `payment_accounts.secret_key`, `courier_accounts.credentials_encrypted` and
   `carts.token` unreadable; every `revoke … from public` (a revoke from PUBLIC does
   not take back what a role holds in its own right, so `record_payment_event`,
