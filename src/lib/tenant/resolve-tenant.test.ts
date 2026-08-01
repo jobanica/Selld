@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest'
 
-import { isReservedSlug, isValidSlug, resolveSurface, slugify } from './resolve-tenant'
+import {
+  isReservedSlug,
+  isValidSlug,
+  resolveSurface,
+  slugify,
+  storeAddress,
+  storeHref,
+} from './resolve-tenant'
 
 const options = { rootDomain: 'selld.ph' }
 
@@ -21,10 +28,12 @@ describe('resolveSurface()', () => {
     expect(resolveSurface('rhea.selld.ph', options)).toEqual({
       kind: 'storefront',
       slug: 'rhea',
+      basePath: '',
     })
     expect(resolveSurface('rheas-finds.selld.ph', options)).toEqual({
       kind: 'storefront',
       slug: 'rheas-finds',
+      basePath: '',
     })
   })
 
@@ -32,10 +41,12 @@ describe('resolveSurface()', () => {
     expect(resolveSurface('rhea.localhost', options)).toEqual({
       kind: 'storefront',
       slug: 'rhea',
+      basePath: '',
     })
     expect(resolveSurface('rhea.localhost:5173', options)).toEqual({
       kind: 'storefront',
       slug: 'rhea',
+      basePath: '',
     })
   })
 
@@ -49,6 +60,7 @@ describe('resolveSurface()', () => {
     expect(resolveSurface('shop.rheasfinds.com', options)).toEqual({
       kind: 'custom-domain',
       hostname: 'shop.rheasfinds.com',
+      basePath: '',
     })
   })
 
@@ -66,11 +78,13 @@ describe('resolveSurface()', () => {
     expect(resolveSurface('rhea.selld.store', { rootDomain: 'selld.store' })).toEqual({
       kind: 'storefront',
       slug: 'rhea',
+      basePath: '',
     })
     // The same host is a custom domain when the root domain differs.
     expect(resolveSurface('rhea.selld.store', options)).toEqual({
       kind: 'custom-domain',
       hostname: 'rhea.selld.store',
+      basePath: '',
     })
   })
 })
@@ -130,5 +144,118 @@ describe('slugify()', () => {
     expect(slug.length).toBeLessThanOrEqual(63)
     expect(slug.endsWith('-')).toBe(false)
     expect(isValidSlug(slug)).toBe(true)
+  })
+})
+
+describe('path-mounted storefronts', () => {
+  const on = (hostname: string, pathname: string) =>
+    resolveSurface(hostname, { rootDomain: 'selld.ph', pathname })
+
+  it('gives a store an address on a host that cannot issue subdomains', () => {
+    // The real case: deployed on *.vercel.app, which has no wildcard, so the
+    // platform host *is* the root domain and stores hang off its path.
+    expect(
+      resolveSurface('selld.vercel.app', {
+        rootDomain: 'selld.vercel.app',
+        pathname: '/store/davao-biryani',
+      }),
+    ).toEqual({
+      kind: 'storefront',
+      slug: 'davao-biryani',
+      basePath: '/store/davao-biryani',
+    })
+  })
+
+  it('a custom domain is itself a store, so its paths are its own pages', () => {
+    // `shop.rheasfinds.com/store/x` is a page in Rhea's shop, not store `x`.
+    expect(on('shop.rheasfinds.com', '/store/davao-biryani')).toEqual({
+      kind: 'custom-domain',
+      hostname: 'shop.rheasfinds.com',
+      basePath: '',
+    })
+  })
+
+  it('mounts every page of the shop under the same prefix', () => {
+    for (const path of ['/store/rhea', '/store/rhea/', '/store/rhea/p/soap', '/store/rhea/cart']) {
+      const surface = on('selld.ph', path)
+      expect(surface, path).toMatchObject({ kind: 'storefront', slug: 'rhea' })
+    }
+  })
+
+  it('leaves the dashboard alone', () => {
+    expect(on('selld.ph', '/orders')).toEqual({ kind: 'dashboard' })
+    expect(on('selld.ph', '/')).toEqual({ kind: 'dashboard' })
+  })
+
+  it('does not collide with the phase 16 short link prefix', () => {
+    // `/s/{slug}` is a broadcast short link and must never resolve to a store.
+    expect(on('selld.ph', '/s/abc123')).toEqual({ kind: 'dashboard' })
+  })
+
+  it('refuses a reserved name through the path, exactly as through a subdomain', () => {
+    expect(on('selld.ph', '/store/admin')).toEqual({ kind: 'dashboard' })
+    expect(resolveSurface('admin.selld.ph', { rootDomain: 'selld.ph' })).toEqual({
+      kind: 'dashboard',
+    })
+  })
+
+  it('refuses a path that is not a valid slug rather than guessing', () => {
+    for (const path of ['/store/', '/store/ab', '/store/Not A Slug', '/store']) {
+      expect(on('selld.ph', path), path).toEqual({ kind: 'dashboard' })
+    }
+  })
+
+  it('a store hostname wins — a shop cannot mount another shop inside itself', () => {
+    expect(on('rhea.selld.ph', '/store/davao-biryani')).toEqual({
+      kind: 'storefront',
+      slug: 'rhea',
+      basePath: '',
+    })
+  })
+
+  it('is opt-in: without a pathname nothing changes', () => {
+    expect(resolveSurface('selld.ph', { rootDomain: 'selld.ph' })).toEqual({ kind: 'dashboard' })
+  })
+})
+
+describe('storeHref', () => {
+  it('is the identity function for a subdomain store', () => {
+    expect(storeHref('', '/')).toBe('/')
+    expect(storeHref('', '/p/soap')).toBe('/p/soap')
+    expect(storeHref('', '/cart/add')).toBe('/cart/add')
+  })
+
+  it('mounts a path store without doubling the slash', () => {
+    expect(storeHref('/store/rhea', '/')).toBe('/store/rhea')
+    expect(storeHref('/store/rhea', '/p/soap')).toBe('/store/rhea/p/soap')
+    expect(storeHref('/store/rhea', '/checkout')).toBe('/store/rhea/checkout')
+  })
+})
+
+describe('storeAddress', () => {
+  it('is the subdomain the product is designed around', () => {
+    expect(storeAddress('rhea', { rootDomain: 'selld.ph', mode: 'subdomain' })).toBe('rhea.selld.ph')
+  })
+
+  it('falls back to a path where the host has no wildcard to give', () => {
+    expect(storeAddress('rhea', { rootDomain: 'selld.vercel.app', mode: 'path' })).toBe(
+      'selld.vercel.app/store/rhea',
+    )
+  })
+
+  it('produces an address resolveSurface agrees is that store', () => {
+    // The seller is shown this string; a buyer types it. If the two disagree the
+    // seller is handing out a link to nothing.
+    for (const mode of ['subdomain', 'path'] as const) {
+      const address = storeAddress('rhea', { rootDomain: 'selld.ph', mode })
+      const [hostname, ...rest] = address.split('/')
+      expect(
+        resolveSurface(hostname as string, {
+          rootDomain: 'selld.ph',
+          pathname: `/${rest.join('/')}`,
+        }),
+        mode,
+      ).toMatchObject({ kind: 'storefront', slug: 'rhea' })
+    }
   })
 })

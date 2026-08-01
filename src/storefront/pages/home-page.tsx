@@ -5,7 +5,7 @@ import { priorityAttrs } from '../image-config'
 import { StoreFooter } from '../components/store-footer'
 import { StoreHeader } from '../components/store-header'
 import type { HomePayload } from '../storefront-data'
-import { useStorageUrl, useStorefront } from '../use-storefront'
+import { useStorageUrl, useStoreHref, useStorefront } from '../use-storefront'
 
 /**
  * Store home: hero, then the grid.
@@ -21,6 +21,7 @@ export function HomePage({
   payload: HomePayload
   query: { category: string | null; search: string | null }
 }) {
+  const href = useStoreHref()
   const { t } = useTranslation()
   const { store } = useStorefront()
   const toUrl = useStorageUrl()
@@ -89,7 +90,7 @@ export function HomePage({
             </p>
             {isFiltered && (
               <a
-                href="/"
+                href={href('/')}
                 className="mt-4 inline-flex h-11 items-center rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground"
               >
                 {t('storefront.backToStore')}

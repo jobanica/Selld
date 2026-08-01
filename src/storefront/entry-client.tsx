@@ -19,6 +19,7 @@ interface BootstrapState {
   data: StorefrontPage
   storageOrigin: string
   origin: string
+  basePath?: string
   cartCount?: number
 }
 
@@ -46,6 +47,7 @@ if (container !== null && state !== null) {
         data={state.data}
         storageOrigin={state.storageOrigin}
         origin={state.origin}
+        basePath={state.basePath ?? ''}
         cartCount={state.cartCount ?? 0}
       />
     </StrictMode>,

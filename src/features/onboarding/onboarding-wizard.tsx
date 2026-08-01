@@ -9,6 +9,7 @@ import { EMPTY_PH_ADDRESS, type PhAddressValue } from '@/features/address/ph-add
 import { useTenant } from '@/features/tenancy/use-tenant'
 import { fetchSettings, writeSettings } from '@/lib/settings'
 import { env } from '@/lib/env'
+import { storeAddress } from '@/lib/tenant/resolve-tenant'
 import { cn } from '@/lib/utils'
 
 import { fetchDefaultLocation, fetchTheme } from './onboarding-api'
@@ -88,7 +89,10 @@ export function OnboardingWizard() {
     )
   }
 
-  const storeUrl = `${activeTenant.slug}.${env.rootDomain}`
+  const storeUrl = storeAddress(activeTenant.slug, {
+    rootDomain: env.rootDomain,
+    mode: env.storeUrlMode,
+  })
   const copy = STEP_COPY[resolvedStep - 1] ?? STEP_COPY[0]
 
   return (

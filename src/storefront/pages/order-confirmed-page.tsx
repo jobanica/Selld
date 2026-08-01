@@ -7,6 +7,7 @@ import { formatManilaDateTime } from '@/lib/time/manila'
 import { money, type OrderReceipt } from '../cart-data'
 import { StoreFooter } from '../components/store-footer'
 import { StoreHeader } from '../components/store-header'
+import { useStoreHref } from '../use-storefront'
 
 /**
  * Order confirmation.
@@ -17,6 +18,7 @@ import { StoreHeader } from '../components/store-header'
  * screen so the buyer never has to go looking for it.
  */
 export function OrderConfirmedPage({ receipt }: { receipt: OrderReceipt }) {
+  const href = useStoreHref()
   const { t } = useTranslation()
   const address = receipt.address
 
@@ -117,7 +119,7 @@ export function OrderConfirmedPage({ receipt }: { receipt: OrderReceipt }) {
           <p className="text-center text-sm text-muted-foreground">{t('confirmed.smsNote')}</p>
 
           <a
-            href="/"
+            href={href('/')}
             className="mx-auto inline-flex h-11 items-center rounded-full border px-5 text-sm font-medium"
           >
             {t('confirmed.keepShopping')}

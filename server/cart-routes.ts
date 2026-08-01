@@ -10,6 +10,7 @@ import type {
   PsgcUnit,
 } from '../src/storefront/cart-data'
 import { isOnlineMethod } from '../src/storefront/cart-data'
+import { storeHref } from '../src/lib/tenant/resolve-tenant'
 import {
   appendSetCookie,
   CART_COOKIE,
@@ -47,6 +48,13 @@ const MAX_BODY_BYTES = 16 * 1024
 export interface StoreRef {
   slug: string | null
   domain: string | null
+  /**
+   * Where this store is mounted on the host, e.g. `/store/rhea`. Empty for the
+   * subdomain and custom-domain forms, where the store owns the whole origin.
+   * Carried here because every redirect out of a cart route is a link back into
+   * the shop, and a bare `/cart` under a path mount leaves it.
+   */
+  basePath: string
 }
 
 /** Read and parse an `application/x-www-form-urlencoded` body. */
@@ -180,7 +188,7 @@ export async function handleCartAdd(
   const body = await readFormBody(request)
   const variantId = body.get('variantId') ?? ''
   const qty = Number.parseInt(body.get('qty') ?? '1', 10)
-  const back = safeReturnPath(body.get('return'))
+  const back = safeReturnPath(body.get('return'), store.basePath)
 
   if (!/^[0-9a-f-]{36}$/i.test(variantId)) return redirect(response, back)
 
@@ -209,7 +217,7 @@ export async function handleCartAdd(
       })
       return redirect(
         response,
-        '/cart',
+        storeHref(store.basePath, '/cart'),
         appendSetCookie(undefined, cartCookie(retry, isSecureRequest(request))),
       )
     }
@@ -243,7 +251,7 @@ export async function handleCartQty(
       // Cart gone; the redirect below will render an empty cart, which is true.
     }
   }
-  return redirect(response, '/cart')
+  return redirect(response, storeHref(store.basePath, '/cart'))
 }
 
 /**
@@ -300,7 +308,7 @@ export async function handleCheckoutPost(
 
   const { token } = await resolveCartToken(supabase, request, store, { create: false })
   if (token === null) {
-    redirect(response, '/cart')
+    redirect(response, storeHref(store.basePath, '/cart'))
     return { kind: 'redirect' }
   }
 
@@ -365,7 +373,7 @@ export async function handleCheckoutPost(
     // No confirmation SMS yet: an online order is not confirmed until it is paid,
     // and texting "we got your order" before the buyer has paid trains them to
     // ignore the one that says it went through.
-    redirect(response, started?.checkoutUrl ?? '/order/confirmed', cookies)
+    redirect(response, started?.checkoutUrl ?? storeHref(store.basePath, '/order/confirmed'), cookies)
     return { kind: 'redirect' }
   }
 
@@ -382,7 +390,7 @@ export async function handleCheckoutPost(
     undefined,
     checkoutCookie({ ...contact, ...named }, isSecureRequest(request)),
   )
-  redirect(response, '/order/confirmed', cookies)
+  redirect(response, storeHref(store.basePath, '/order/confirmed'), cookies)
   return { kind: 'redirect' }
 }
 
@@ -479,10 +487,16 @@ function normalisePhPhone(input: string): string {
   return input.trim()
 }
 
-function safeReturnPath(value: string | null): string {
+function safeReturnPath(value: string | null, basePath: string): string {
   // Only same-origin absolute paths. Reflecting an arbitrary value here would turn
   // the cart into an open redirect.
-  if (value === null || !value.startsWith('/') || value.startsWith('//')) return '/cart'
+  const fallback = storeHref(basePath, '/cart')
+  if (value === null || !value.startsWith('/') || value.startsWith('//')) return fallback
+  // And under a path mount, only paths inside *this* store. Same-origin is no
+  // longer the whole test once several shops share a host: a posted `return` of
+  // `/store/someone-else` would bounce the buyer into a different seller's shop
+  // mid-purchase, carrying their cart cookie with them.
+  if (basePath !== '' && value !== basePath && !value.startsWith(`${basePath}/`)) return fallback
   return value.slice(0, 300)
 }
 

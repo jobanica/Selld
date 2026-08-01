@@ -26,6 +26,12 @@ export interface RenderInput {
   origin: string
   storageOrigin: string
   path: string
+  /**
+   * Where this store is mounted on the host — `/store/rhea`, or empty when the
+   * store owns the whole origin. Every link and form action the storefront
+   * renders is joined onto it.
+   */
+  basePath?: string
   /** Items in the cart, for the header badge. */
   cartCount?: number
 }
@@ -58,6 +64,7 @@ export function render({
   origin,
   storageOrigin,
   path,
+  basePath = '',
   cartCount = 0,
 }: RenderInput): RenderOutput {
   const html = renderToString(
@@ -66,12 +73,13 @@ export function render({
         data={data}
         storageOrigin={storageOrigin}
         origin={origin}
+        basePath={basePath}
         cartCount={cartCount}
       />
     </StrictMode>,
   )
 
-  const head = buildHead({ data, origin, storageOrigin, path })
+  const head = buildHead({ data, origin, storageOrigin, path, basePath })
   const store = storeOf(data)
 
   const parts: string[] = [head.tags]
@@ -93,7 +101,7 @@ export function render({
     // server HTML to contain a <span> in <a>" — and React responded by discarding
     // the entire server-rendered tree and re-rendering from scratch. A silent
     // mismatch like that undoes the whole reason this surface is server-rendered.
-    state: serializeForScript({ data, storageOrigin, origin, cartCount }),
+    state: serializeForScript({ data, storageOrigin, origin, basePath, cartCount }),
     preload: buildPreload({ data, storageOrigin }),
     status: statusFor(data),
   }

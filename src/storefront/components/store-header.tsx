@@ -1,7 +1,9 @@
 import { ShoppingBag } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
-import { useStorageUrl, useStorefront } from '../use-storefront'
+import { storeHref } from '@/lib/tenant/resolve-tenant'
+
+import { useStorageUrl, useStoreHref, useStorefront } from '../use-storefront'
 
 /**
  * Store header.
@@ -23,14 +25,15 @@ export function StoreHeader({
   showSearch?: boolean
 }) {
   const { t } = useTranslation()
-  const { store, cartCount } = useStorefront()
+  const { store, cartCount, basePath } = useStorefront()
+  const href = useStoreHref()
   const toUrl = useStorageUrl()
   const logo = toUrl(store.logoPath)
 
   return (
     <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
       <div className="mx-auto flex w-full max-w-6xl items-center gap-3 px-4 py-3">
-        <a href="/" className="flex min-w-0 items-center gap-2.5">
+        <a href={href('/')} className="flex min-w-0 items-center gap-2.5">
           {logo === null ? (
             <span
               aria-hidden="true"
@@ -53,7 +56,7 @@ export function StoreHeader({
         </a>
 
         {showSearch && (
-          <form action="/" method="get" role="search" className="ml-auto flex min-w-0 flex-1 justify-end">
+          <form action={href('/')} method="get" role="search" className="ml-auto flex min-w-0 flex-1 justify-end">
             {/* Keep the category filter when searching within it. */}
             {activeCategory !== null && <input type="hidden" name="category" value={activeCategory} />}
             <label className="sr-only" htmlFor="store-search">
@@ -73,7 +76,7 @@ export function StoreHeader({
 
       {/* Cart. A plain link, so it works before hydration and is crawl-safe. */}
         <a
-          href="/cart"
+          href={href('/cart')}
           className={
             showSearch
               ? 'relative grid size-11 shrink-0 place-items-center rounded-full hover:bg-accent'
@@ -93,13 +96,13 @@ export function StoreHeader({
       {categories.length > 0 && (
         <nav aria-label={t('storefront.categoriesLabel')} className="border-t">
           <ul className="mx-auto flex w-full max-w-6xl gap-1 overflow-x-auto px-3 py-2 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-            <CategoryChip href={buildUrl(null, search)} active={activeCategory === null}>
+            <CategoryChip href={buildUrl(basePath, null, search)} active={activeCategory === null}>
               {t('storefront.allProducts')}
             </CategoryChip>
             {categories.map((category) => (
               <CategoryChip
                 key={category.slug}
-                href={buildUrl(category.slug, search)}
+                href={buildUrl(basePath, category.slug, search)}
                 active={activeCategory === category.slug}
               >
                 {category.name}
@@ -112,12 +115,13 @@ export function StoreHeader({
   )
 }
 
-function buildUrl(category: string | null, search: string): string {
+function buildUrl(basePath: string, category: string | null, search: string): string {
   const params = new URLSearchParams()
   if (category !== null) params.set('category', category)
   if (search.trim() !== '') params.set('q', search.trim())
   const query = params.toString()
-  return query === '' ? '/' : `/?${query}`
+  const root = storeHref(basePath, '/')
+  return query === '' ? root : `${root}?${query}`
 }
 
 function CategoryChip({

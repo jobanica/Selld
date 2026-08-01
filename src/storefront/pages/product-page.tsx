@@ -17,7 +17,7 @@ import {
   srcSet,
   type ProductPayload,
 } from '../storefront-data'
-import { useStorageUrl, useStorefront } from '../use-storefront'
+import { useStorageUrl, useStoreHref, useStorefront } from '../use-storefront'
 
 /**
  * Product detail.
@@ -27,6 +27,7 @@ import { useStorageUrl, useStorefront } from '../use-storefront'
  * runs. Hydration adds the gallery and the variant picker.
  */
 export function ProductPage({ payload }: { payload: ProductPayload }) {
+  const href = useStoreHref()
   const { t } = useTranslation()
   const toUrl = useStorageUrl()
   const { storageOrigin } = useStorefront()
@@ -75,7 +76,7 @@ export function ProductPage({ payload }: { payload: ProductPayload }) {
       <main className="mx-auto w-full max-w-6xl px-4 pb-28 sm:pb-16">
         <nav className="py-3 text-sm">
           <a
-            href={product.categorySlug === null ? '/' : `/?category=${product.categorySlug}`}
+            href={product.categorySlug === null ? href('/') : href(`/?category=${product.categorySlug}`)}
             className="inline-flex h-11 items-center gap-1 -ml-1 pr-2 text-muted-foreground hover:text-foreground"
           >
             <ChevronLeft className="size-4" aria-hidden="true" />
@@ -336,13 +337,14 @@ function AddToCart({
   productSlug: string
   className?: string
 }) {
+  const href = useStoreHref()
   return (
-    <form method="post" action="/cart/add" className={cn('w-full', className)}>
+    <form method="post" action={href('/cart/add')} className={cn('w-full', className)}>
       <input type="hidden" name="variantId" value={variantId ?? ''} />
       <input type="hidden" name="qty" value="1" />
       {/* Come back to this product, so a buyer can add a second variant without
           navigating. Validated server-side as a same-origin path. */}
-      <input type="hidden" name="return" value={`/p/${productSlug}`} />
+      <input type="hidden" name="return" value={href(`/p/${productSlug}`)} />
       <button
         type="submit"
         disabled={disabled || variantId === null}

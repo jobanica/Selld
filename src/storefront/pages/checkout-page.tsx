@@ -12,6 +12,7 @@ import {
 import { StoreFooter } from '../components/store-footer'
 import { StoreHeader } from '../components/store-header'
 import { Totals } from './cart-page'
+import { useStoreHref } from '../use-storefront'
 
 /**
  * Guest checkout, on one page.
@@ -39,6 +40,7 @@ export function CheckoutPage({
 }: {
   data: Extract<CartPageData, { route: 'checkout' }>
 }) {
+  const href = useStoreHref()
   const { t } = useTranslation()
   const { quote, contact, address, options, error, onlineMethods } = data
 
@@ -74,7 +76,7 @@ export function CheckoutPage({
           </p>
         )}
 
-        <form method="post" action="/checkout" className="flex flex-col gap-6" data-checkout-form>
+        <form method="post" action={href('/checkout')} className="flex flex-col gap-6" data-checkout-form>
           {/* 1 — Contact */}
           <section className="flex flex-col gap-3">
             <h2 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
@@ -314,7 +316,7 @@ export function CheckoutPage({
             </label>
             <p className="text-xs text-muted-foreground">
               {t('checkout.privacyNote')}{' '}
-              <a href="/privacy" className="underline underline-offset-2">
+              <a href={href('/privacy')} className="underline underline-offset-2">
                 {t('checkout.privacyLink')}
               </a>
             </p>

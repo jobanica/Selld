@@ -12,12 +12,7 @@ import { useTenant } from '@/features/tenancy/use-tenant'
 import type { Translate } from '@/lib/i18n'
 import { env } from '@/lib/env'
 import { errorMessage } from '@/lib/supabase/errors'
-import {
-  isReservedSlug,
-  isValidSlug,
-  slugify,
-  slugifyWhileTyping,
-} from '@/lib/tenant/resolve-tenant'
+import { isReservedSlug, isValidSlug, slugify, slugifyWhileTyping, storeAddress } from '@/lib/tenant/resolve-tenant'
 
 /**
  * Shown when an authenticated user belongs to no tenant yet.
@@ -112,7 +107,7 @@ export function CreateStorePage() {
                   with a space in it, presented to the seller as their shop. */}
               <p id="store-slug-hint" className="text-xs text-muted-foreground">
                 {effectiveSlug !== '' && slugProblem === null
-                  ? `${effectiveSlug}.${env.rootDomain}`
+                  ? storeAddress(effectiveSlug, { rootDomain: env.rootDomain, mode: env.storeUrlMode })
                   : t('tenant.slugHint')}
               </p>
               {slugProblem && (

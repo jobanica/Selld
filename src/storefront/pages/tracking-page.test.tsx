@@ -80,7 +80,7 @@ function draw(data: TrackingPayload | null, locale: Locale = 'en') {
   return render(
     <I18nextProvider i18n={createI18nInstance(locale)}>
       <StorefrontProvider
-        value={{ store: STORE, storageOrigin: '', origin: 'http://x', cartCount: 0 }}
+        value={{ store: STORE, storageOrigin: '', origin: 'http://x', basePath: '', cartCount: 0 }}
       >
         <TrackingPage data={data} />
       </StorefrontProvider>

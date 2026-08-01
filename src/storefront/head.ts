@@ -1,4 +1,5 @@
 import { formatPHP } from '@/lib/money'
+import { storeHref } from '@/lib/tenant/resolve-tenant'
 
 import type { CartPageData } from './cart-data'
 import { price, priceRange, storageUrl, type PageData, type Store } from './storefront-data'
@@ -61,6 +62,12 @@ export interface HeadInput {
   storageOrigin: string
   /** Path with query, for the canonical URL. */
   path: string
+  /**
+   * Where the store is mounted. The server strips this before routing, so
+   * `path` arrives without it — and a canonical URL that omits it points at a
+   * page that does not exist, which is worse than having no canonical at all.
+   */
+  basePath?: string
 }
 
 export interface HeadResult {
@@ -69,7 +76,13 @@ export interface HeadResult {
   jsonLd: string | null
 }
 
-export function buildHead({ data, origin, storageOrigin, path }: HeadInput): HeadResult {
+export function buildHead({
+  data,
+  origin,
+  storageOrigin,
+  path,
+  basePath = '',
+}: HeadInput): HeadResult {
   // Cart, checkout and the receipt are per-buyer pages with nothing to rank and,
   // from the checkout step onward, a name, phone number and address on them. They
   // are noindex, carry no canonical, and get no OG tags — a crawler that indexed a
@@ -125,7 +138,7 @@ export function buildHead({ data, origin, storageOrigin, path }: HeadInput): Hea
   }
 
   const store = data.payload.store
-  const canonical = `${origin}${canonicalPath(data, path)}`
+  const canonical = `${origin}${storeHref(basePath, canonicalPath(data, path))}`
 
   if (data.route === 'product' && data.payload.product !== null) {
     const { product, images, variants } = data.payload

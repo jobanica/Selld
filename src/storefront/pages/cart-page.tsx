@@ -9,7 +9,7 @@ import { StoreFooter } from '../components/store-footer'
 import { StoreHeader } from '../components/store-header'
 import { CARD_IMAGE_SIZES, NATURAL_IMAGE_WIDTH } from '../image-config'
 import { srcSet } from '../storefront-data'
-import { useStorageUrl, useStorefront } from '../use-storefront'
+import { useStorageUrl, useStoreHref, useStorefront } from '../use-storefront'
 
 /**
  * The cart.
@@ -24,6 +24,7 @@ import { useStorageUrl, useStorefront } from '../use-storefront'
  * money, and the one the buyer saw is the one they will argue about.
  */
 export function CartPage({ quote }: { quote: CartQuote | null }) {
+  const href = useStoreHref()
   const { t } = useTranslation()
   const { storageOrigin } = useStorefront()
   const toUrl = useStorageUrl()
@@ -51,7 +52,7 @@ export function CartPage({ quote }: { quote: CartQuote | null }) {
             <p className="font-medium">{t('cart.empty')}</p>
             <p className="mt-1 text-sm text-muted-foreground">{t('cart.emptyHint')}</p>
             <a
-              href="/"
+              href={href('/')}
               className="mt-4 inline-flex h-11 items-center rounded-full bg-primary px-5 text-sm font-medium text-primary-foreground"
             >
               {t('cart.startShopping')}
@@ -66,7 +67,7 @@ export function CartPage({ quote }: { quote: CartQuote | null }) {
                 return (
                   <li key={line.variantId} className="flex gap-3 p-3">
                     <a
-                      href={`/p/${line.productSlug}`}
+                      href={href(`/p/${line.productSlug}`)}
                       className="size-20 shrink-0 overflow-hidden rounded-lg bg-muted"
                     >
                       {image === null ? (
@@ -92,7 +93,7 @@ export function CartPage({ quote }: { quote: CartQuote | null }) {
                     </a>
 
                     <div className="flex min-w-0 flex-1 flex-col gap-1">
-                      <a href={`/p/${line.productSlug}`} className="text-sm font-medium leading-snug">
+                      <a href={href(`/p/${line.productSlug}`)} className="text-sm font-medium leading-snug">
                         {line.productName}
                       </a>
                       {line.variantLabel !== null && (
@@ -120,7 +121,7 @@ export function CartPage({ quote }: { quote: CartQuote | null }) {
 
                       <div className="mt-1 flex items-center gap-2">
                         <QtyStepper variantId={line.variantId} qty={line.qty} />
-                        <form method="post" action="/cart/qty" className="ml-auto">
+                        <form method="post" action={href('/cart/qty')} className="ml-auto">
                           <input type="hidden" name="variantId" value={line.variantId} />
                           <input type="hidden" name="qty" value="0" />
                           <button
@@ -156,7 +157,7 @@ export function CartPage({ quote }: { quote: CartQuote | null }) {
               <p className="font-semibold">{formatPHP(money(quote.grandTotal))}</p>
             </div>
             <a
-              href="/checkout"
+              href={href('/checkout')}
               className="flex h-12 shrink-0 items-center rounded-full bg-primary px-6 text-sm font-semibold text-primary-foreground"
             >
               {t('cart.checkout')}
@@ -178,10 +179,11 @@ export function CartPage({ quote }: { quote: CartQuote | null }) {
  * has to dismiss. Two 44px targets is one tap per unit and works with no JS at all.
  */
 function QtyStepper({ variantId, qty }: { variantId: string; qty: number }) {
+  const href = useStoreHref()
   const { t } = useTranslation()
   return (
     <div className="flex items-center rounded-lg border">
-      <form method="post" action="/cart/qty">
+      <form method="post" action={href('/cart/qty')}>
         <input type="hidden" name="variantId" value={variantId} />
         <input type="hidden" name="qty" value={Math.max(0, qty - 1)} />
         <button
@@ -195,7 +197,7 @@ function QtyStepper({ variantId, qty }: { variantId: string; qty: number }) {
       <span aria-live="polite" className="min-w-8 text-center text-sm font-medium tabular">
         {qty}
       </span>
-      <form method="post" action="/cart/qty">
+      <form method="post" action={href('/cart/qty')}>
         <input type="hidden" name="variantId" value={variantId} />
         <input type="hidden" name="qty" value={qty + 1} />
         <button

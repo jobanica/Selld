@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url'
 import { brotliCompressSync, gzipSync } from 'node:zlib'
 
 import type { render as renderStorefront } from '../src/storefront/entry-server'
-import { resolveSurface } from '../src/lib/tenant/resolve-tenant'
+import { resolveSurface, storeHref } from '../src/lib/tenant/resolve-tenant'
 import type { CheckoutAddress, CheckoutContact } from '../src/storefront/cart-data'
 import {
   EMPTY_PSGC_OPTIONS,
@@ -402,6 +402,7 @@ async function handle(
   // `rheas-finds.localhost:5174` exercises the real subdomain path in dev.
   const surface = resolveSurface(hostname, {
     rootDomain: hostname.endsWith('.localhost') || hostname === 'localhost' ? 'localhost' : ROOT_DOMAIN,
+    pathname: url.pathname,
   })
 
   // The dashboard is not this server's job — hand it the SPA shell and let the
@@ -412,6 +413,24 @@ async function handle(
 
   const slug = surface.kind === 'storefront' ? surface.slug : null
   const domain = surface.kind === 'custom-domain' ? surface.hostname : null
+
+  /**
+   * One strip, at the front door.
+   *
+   * Every route below matches a root-relative path — `/cart`, `/p/{slug}`,
+   * `/checkout`, `/track/{n}`. Mounting a store under `/store/{slug}` is
+   * therefore a question of *removing* the prefix once here, rather than of
+   * teaching thirty route matchers about it and finding out in production which
+   * one was missed. It is also what keeps the subdomain form free of any path
+   * handling at all: there `basePath` is empty and this is a no-op.
+   *
+   * Deliberately after the webhook and static branches above, which are platform
+   * paths and never carry a store prefix.
+   */
+  const basePath = surface.basePath
+  if (basePath !== '') {
+    url.pathname = url.pathname.slice(basePath.length) || '/'
+  }
 
   if (IS_PRODUCTION && (await serveStatic(url.pathname, response))) return
 
@@ -427,16 +446,20 @@ async function handle(
   }
 
   if (url.pathname === '/robots.txt') {
-    return sendText(request, response, robotsTxt(url.origin), 'text/plain; charset=utf-8')
+    return sendText(request, response, robotsTxt(`${url.origin}${basePath}`), 'text/plain; charset=utf-8')
   }
 
   if (url.pathname === '/sitemap.xml') {
-    const sitemap = await buildSitemap(context.supabase, { slug, domain, origin: url.origin })
+    const sitemap = await buildSitemap(context.supabase, {
+      slug,
+      domain,
+      origin: `${url.origin}${basePath}`,
+    })
     if (sitemap === null) return sendNotFoundXml(response)
     return sendText(request, response, sitemap, 'application/xml; charset=utf-8')
   }
 
-  const store: StoreRef = { slug, domain }
+  const store: StoreRef = { slug, domain, basePath }
 
   // ---- Cart and checkout ------------------------------------------------
   // Mutations are POST-only. A cart that can be changed by a GET is a cart that
@@ -480,7 +503,7 @@ async function handle(
       fetchQuote(context.supabase, token),
       fetchStoreBranding(context.supabase, store),
     ])
-    return renderPage(request, response, context, url, { route: 'cart', store: branding, quote })
+    return renderPage(request, response, context, url, basePath, { route: 'cart', store: branding, quote })
   }
 
   if (url.pathname === '/checkout') {
@@ -520,7 +543,7 @@ async function handle(
   const claimMatch = /^\/live\/claim\/([0-9a-f]{64})$/.exec(url.pathname)
   if (claimMatch !== null) {
     response.writeHead(303, {
-      Location: '/checkout',
+      Location: storeHref(basePath, '/checkout'),
       'Set-Cookie': cartCookie(claimMatch[1]!, isSecureRequest(request)),
       'Cache-Control': 'no-store',
       // Never indexed and never sent onward: the path is a bearer token.
@@ -552,7 +575,7 @@ async function handle(
     // No store at this hostname: fall through to the generic not-found below
     // rather than rendering a tracking page with no branding to render it in.
     if (branding !== null) {
-      return renderPage(request, response, context, url, {
+      return renderPage(request, response, context, url, basePath, {
         route: 'track',
         store: branding,
         tracking,
@@ -569,7 +592,7 @@ async function handle(
       fetchPolicyVersion(context.supabase),
     ])
     if (branding !== null) {
-      return renderPage(request, response, context, url, {
+      return renderPage(request, response, context, url, basePath, {
         route: 'privacy',
         store: branding,
         policyVersion: version,
@@ -584,8 +607,8 @@ async function handle(
     ])
     // No receipt means no order for this cookie — a bookmarked confirmation, or a
     // cleared cookie. The cart is the honest place to land, not an error.
-    if (receipt === null) return redirectTo(response, '/cart')
-    return renderPage(request, response, context, url, {
+    if (receipt === null) return redirectTo(response, storeHref(basePath, '/cart'))
+    return renderPage(request, response, context, url, basePath, {
       route: 'order-confirmed',
       store: branding,
       receipt,
@@ -599,6 +622,7 @@ async function handle(
     data,
     origin: url.origin,
     storageOrigin: context.supabase.url,
+    basePath,
     path: `${url.pathname}${url.search}`,
   })
 
@@ -801,6 +825,7 @@ async function renderPage(
   response: ServerResponse,
   context: RenderContext,
   url: URL,
+  basePath: string,
   page: CartPageData,
 ): Promise<void> {
   const { render } = await context.loadRenderer()
@@ -808,6 +833,7 @@ async function renderPage(
     data: page,
     origin: url.origin,
     storageOrigin: context.supabase.url,
+    basePath,
     path: `${url.pathname}${url.search}`,
     cartCount: page.route === 'cart' || page.route === 'checkout' ? (page.quote?.itemCount ?? 0) : 0,
   })
@@ -837,7 +863,9 @@ async function renderCheckout(
 
   // An empty cart has nothing to check out. Sending the buyer back is kinder than
   // rendering a form that cannot be submitted.
-  if (quote === null || quote.itemCount === 0) return redirectTo(response, '/cart')
+  if (quote === null || quote.itemCount === 0) {
+    return redirectTo(response, storeHref(input.store.basePath, '/cart'))
+  }
 
   const [options, branding, onlineMethods] = await Promise.all([
     fetchPsgcOptions(context.supabase, input.address).catch(() => EMPTY_PSGC_OPTIONS),
@@ -845,7 +873,7 @@ async function renderCheckout(
     fetchOnlineMethods(context.supabase, input.store),
   ])
 
-  return renderPage(request, response, context, input.url, {
+  return renderPage(request, response, context, input.url, input.store.basePath, {
     route: 'checkout',
     store: branding,
     quote,

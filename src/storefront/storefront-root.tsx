@@ -29,6 +29,8 @@ export interface StorefrontRootProps {
   data: StorefrontPage
   storageOrigin: string
   origin: string
+  /** Where this store is mounted on the host; empty when it owns the origin. */
+  basePath?: string
   /** Item count for the header badge; cart pages carry their own. */
   cartCount?: number
 }
@@ -51,6 +53,7 @@ export function StorefrontRoot({
   data,
   storageOrigin,
   origin,
+  basePath = '',
   cartCount = 0,
 }: StorefrontRootProps) {
   const store = storeOf(data)
@@ -81,7 +84,7 @@ export function StorefrontRoot({
       {store === null ? (
         body
       ) : (
-        <StorefrontProvider value={{ store, storageOrigin, origin, cartCount }}>
+        <StorefrontProvider value={{ store, storageOrigin, origin, basePath, cartCount }}>
           {body}
         </StorefrontProvider>
       )}

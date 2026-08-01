@@ -1,3 +1,5 @@
+import type { StoreUrlMode } from '@/lib/tenant/resolve-tenant'
+
 /**
  * Client environment.
  *
@@ -15,6 +17,7 @@ const raw = {
   supabaseUrl: import.meta.env.VITE_SUPABASE_URL,
   supabaseAnonKey: import.meta.env.VITE_SUPABASE_ANON_KEY,
   rootDomain: import.meta.env.VITE_APP_ROOT_DOMAIN,
+  storeUrlMode: import.meta.env.VITE_STORE_URL_MODE,
   appEnv: import.meta.env.VITE_APP_ENV,
 }
 
@@ -25,8 +28,14 @@ function present(value: string | undefined): string | null {
 export const env = {
   supabaseUrl: present(raw.supabaseUrl),
   supabaseAnonKey: present(raw.supabaseAnonKey),
-  /** Storefronts live at `{slug}.<rootDomain>`. */
+  /** Storefronts live at `{slug}.<rootDomain>`, or `<rootDomain>/store/{slug}`. */
   rootDomain: present(raw.rootDomain) ?? 'selld.ph',
+  /**
+   * `path` only where the host cannot issue wildcard subdomains — a
+   * `*.vercel.app` deployment, say. Anything unrecognised falls back to the
+   * product's real shape rather than guessing.
+   */
+  storeUrlMode: (present(raw.storeUrlMode) === 'path' ? 'path' : 'subdomain') as StoreUrlMode,
   appEnv: present(raw.appEnv) ?? (import.meta.env.PROD ? 'production' : 'development'),
   isProduction: import.meta.env.PROD,
 }

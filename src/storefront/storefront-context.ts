@@ -12,6 +12,12 @@ export interface StorefrontContextValue {
   storageOrigin: string
   /** Absolute origin of this store, for canonical and OG URLs. */
   origin: string
+  /**
+   * Where this store is mounted on the host — `/store/rhea`, or empty when the
+   * store owns the whole origin. Never build a storefront link without it; use
+   * `useStoreHref()` rather than reading it directly.
+   */
+  basePath: string
   /** Items in the cart, for the header badge. */
   cartCount: number
 }

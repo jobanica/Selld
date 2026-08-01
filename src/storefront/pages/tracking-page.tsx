@@ -6,6 +6,7 @@ import { formatManilaDateTime } from '@/lib/time/manila'
 import type { TrackingPayload } from '../cart-data'
 import { StoreFooter } from '../components/store-footer'
 import { StoreHeader } from '../components/store-header'
+import { useStoreHref } from '../use-storefront'
 
 /**
  * "Nasaan na po order ko", answered before it is asked.
@@ -21,6 +22,7 @@ import { StoreHeader } from '../components/store-header'
  * while standing outside, and it must be readable before anything hydrates.
  */
 export function TrackingPage({ data }: { data: TrackingPayload | null }) {
+  const href = useStoreHref()
   const { t } = useTranslation()
 
   if (data === null) {
@@ -162,7 +164,7 @@ export function TrackingPage({ data }: { data: TrackingPayload | null }) {
         </p>
 
         <a
-          href="/"
+          href={href('/')}
           className="mx-auto mt-4 inline-flex h-11 items-center rounded-full border px-5 text-sm font-medium"
         >
           {t('cart.startShopping')}

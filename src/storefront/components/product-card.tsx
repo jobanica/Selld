@@ -5,7 +5,7 @@ import { cn } from '@/lib/utils'
 
 import { price, priceRange, srcSet, type ProductCard as ProductCardData } from '../storefront-data'
 import { CARD_IMAGE_SIZES, NATURAL_IMAGE_WIDTH, priorityAttrs } from '../image-config'
-import { useStorageUrl, useStorefront } from '../use-storefront'
+import { useStorageUrl, useStoreHref, useStorefront } from '../use-storefront'
 
 /**
  * One product in the grid.
@@ -23,6 +23,7 @@ export function ProductCard({
   product: ProductCardData
   priority?: boolean
 }) {
+  const href = useStoreHref()
   const { t } = useTranslation()
   const toUrl = useStorageUrl()
   const { storageOrigin } = useStorefront()
@@ -43,7 +44,7 @@ export function ProductCard({
 
   return (
     <a
-      href={`/p/${product.slug}`}
+      href={href(`/p/${product.slug}`)}
       className="group flex w-full flex-col overflow-hidden rounded-xl border bg-card transition-shadow focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none hover:shadow-md"
     >
       {/*
