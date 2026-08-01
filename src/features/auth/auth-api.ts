@@ -24,8 +24,8 @@ export interface RequestOtpResult {
 }
 
 export class AuthValidationError extends Error {
-  readonly field: 'email' | 'phone' | 'code'
-  constructor(field: 'email' | 'phone' | 'code', message: string) {
+  readonly field: 'email' | 'phone' | 'code' | 'password'
+  constructor(field: 'email' | 'phone' | 'code' | 'password', message: string) {
     super(message)
     this.name = 'AuthValidationError'
     this.field = field
@@ -40,6 +40,102 @@ export function normalizeEmail(raw: string): string {
 
 export function isValidEmail(raw: string): boolean {
   return EMAIL_PATTERN.test(normalizeEmail(raw))
+}
+
+/**
+ * Shortest password we will set or accept.
+ *
+ * Eight, not the six the Supabase project will tolerate: the floor a seller
+ * meets is the floor most of them will sit exactly on, and this account can read
+ * every customer's name, phone and address.
+ */
+export const MIN_PASSWORD_LENGTH = 8
+
+export function isValidPassword(password: string): boolean {
+  return password.length >= MIN_PASSWORD_LENGTH
+}
+
+/**
+ * Email + password.
+ *
+ * Added alongside the codes rather than replacing them. A seller who signs in
+ * from the same phone every day would rather type a password they know than
+ * fetch a code from an inbox they do not open; a seller who has forgotten it —
+ * and phone-first sellers, who often have no working email at all — still have
+ * the code path, which needs nothing remembered.
+ */
+export async function signInWithPassword(rawEmail: string, password: string): Promise<void> {
+  const email = normalizeEmail(rawEmail)
+  if (!isValidEmail(email)) {
+    throw new AuthValidationError('email', 'Enter a valid email address.')
+  }
+  if (password === '') {
+    throw new AuthValidationError('password', 'Enter your password.')
+  }
+
+  const { error } = await getSupabase().auth.signInWithPassword({ email, password })
+  if (error) throw error
+}
+
+/**
+ * Start a password reset — by code, not by link.
+ *
+ * `resetPasswordForEmail` would email a link back to the app's origin, and the
+ * comment at the top of this file is the reason not to: it opens in whichever
+ * mail client's in-app browser the seller uses, which is a different session
+ * from the one they are sitting in. The recovery template on this project sends
+ * `{{ .Token }}`, so the same six digits and the same screen serve both flows.
+ */
+export async function requestPasswordReset(rawEmail: string): Promise<RequestOtpResult> {
+  const email = normalizeEmail(rawEmail)
+  if (!isValidEmail(email)) {
+    throw new AuthValidationError('email', 'Enter a valid email address.')
+  }
+
+  // `shouldCreateUser: false` — a reset must not quietly create an account for a
+  // typo'd address, which would then be a real account nobody owns.
+  const { error } = await getSupabase().auth.signInWithOtp({
+    email,
+    options: { shouldCreateUser: false },
+  })
+  if (error) throw error
+  return { channel: 'email', destination: email }
+}
+
+/**
+ * Finish a reset: prove the code, then set the password.
+ *
+ * Two calls, in this order, and the order is the security property —
+ * `updateUser` changes the password of whoever the current session belongs to,
+ * so it is only safe once `verifyOtp` has established that the session belongs
+ * to the person who read the email.
+ */
+export async function completePasswordReset(input: {
+  email: string
+  code: string
+  password: string
+}): Promise<void> {
+  const code = input.code.trim()
+  if (!isValidOtpCode(code)) {
+    throw new AuthValidationError('code', 'Enter the 6-digit code.')
+  }
+  if (!isValidPassword(input.password)) {
+    throw new AuthValidationError(
+      'password',
+      `Use at least ${String(MIN_PASSWORD_LENGTH)} characters.`,
+    )
+  }
+
+  const supabase = getSupabase()
+  const { error: verifyError } = await supabase.auth.verifyOtp({
+    email: normalizeEmail(input.email),
+    token: code,
+    type: 'email',
+  })
+  if (verifyError) throw verifyError
+
+  const { error } = await supabase.auth.updateUser({ password: input.password })
+  if (error) throw error
 }
 
 /** Send a 6-digit code to an email address. */
