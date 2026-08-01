@@ -16,7 +16,7 @@
   "scripts": {
     "dev": "vite",
     "dev:store": "tsx --tsconfig tsconfig.server.json --env-file-if-exists=.env.local server/storefront-server.ts",
-    "build": "tsc -b && pnpm build:client && pnpm build:server",
+    "build": "tsc -b && pnpm build:client && pnpm build:server && pnpm build:api",
     "preview": "pnpm build && pnpm start",
     "typecheck": "tsc -b --noEmit",
     "lint": "eslint .",
@@ -29,7 +29,7 @@
     "db:reset": "supabase db reset",
     "db:migrate": "supabase migration up",
     "db:new": "supabase migration new",
-    "db:types": "supabase gen types typescript --local > /tmp/selld-types.ts && printf '%s\\n' '/**' ' * Generated Supabase types — DO NOT EDIT BY HAND.' ' *' ' * Regenerate after every migration:' ' *   pnpm db:types' ' *' ' * Checked in so CI can typecheck without a running database.' ' */' '' > src/lib/supabase/database.types.ts && cat /tmp/selld-types.ts >> src/lib/supabase/database.types.ts",
+    "db:types": "supabase gen types typescript --local > /tmp/selld-types.ts && printf '%s\\n' '/**' ' * Generated Supabase types \u2014 DO NOT EDIT BY HAND.' ' *' ' * Regenerate after every migration:' ' *   pnpm db:types' ' *' ' * Checked in so CI can typecheck without a running database.' ' */' '' > src/lib/supabase/database.types.ts && cat /tmp/selld-types.ts >> src/lib/supabase/database.types.ts",
     "db:test": "tsx scripts/db-test.ts",
     "db:test:concurrency": "tsx scripts/db-concurrency-test.ts",
     "psgc:build": "tsx scripts/psgc-build.ts",
@@ -40,7 +40,8 @@
     "build:server": "vite build --ssr src/storefront/entry-server.tsx",
     "start": "NODE_ENV=production tsx --tsconfig tsconfig.server.json --env-file-if-exists=.env.local server/storefront-server.ts",
     "seed:demo": "tsx --env-file-if-exists=.env.local scripts/seed-demo.ts",
-    "lighthouse": "tsx --env-file-if-exists=.env.local scripts/lighthouse-check.ts"
+    "lighthouse": "tsx --env-file-if-exists=.env.local scripts/lighthouse-check.ts",
+    "build:api": "esbuild server/vercel-entry.ts --bundle --platform=node --format=esm --target=node22 --tsconfig=tsconfig.server.json --external:vite --external:lightningcss --outfile=dist/api/handler.js"
   },
   "dependencies": {
     "@radix-ui/react-dropdown-menu": "^2.1.20",
