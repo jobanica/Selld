@@ -18,6 +18,18 @@ import { defineConfig } from 'vite'
  */
 export default defineConfig(({ isSsrBuild }) => ({
   plugins: [react(), tailwindcss()],
+  /**
+   * Bundle the SSR renderer's dependencies instead of leaving them as bare
+   * imports.
+   *
+   * Vite externalises node_modules for an SSR build, on the assumption that the
+   * server runs next to its own `node_modules`. A serverless host ships only
+   * what it traced from the function entry, and it cannot trace a path this
+   * server builds at runtime — so `dist/server/entry-server.js` arrived alone
+   * and every request died on `Cannot find package 'react'`. Self-contained is
+   * also the honest shape for a build artefact that is copied somewhere else.
+   */
+  ssr: { noExternal: true },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
