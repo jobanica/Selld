@@ -28,8 +28,14 @@ export default defineConfig(({ isSsrBuild }) => ({
    * server builds at runtime — so `dist/server/entry-server.js` arrived alone
    * and every request died on `Cannot find package 'react'`. Self-contained is
    * also the honest shape for a build artefact that is copied somewhere else.
+   *
+   * Gated on `isSsrBuild`, and that gate is load-bearing. Applied unconditionally
+   * it also governs the *dev* SSR module runner, which then tries to inline
+   * React's CommonJS entry into an ESM evaluator and every dev request dies with
+   * `ReferenceError: module is not defined`. Production was fine, which is the
+   * worst way for this to be wrong.
    */
-  ssr: { noExternal: true },
+  ...(isSsrBuild === true ? { ssr: { noExternal: true } } : {}),
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
