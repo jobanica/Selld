@@ -69,7 +69,23 @@ import { readSupabaseConfig, rpc, type SupabaseConfig } from './supabase-rpc'
  * not known when the build runs.
  */
 
-const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)))
+/**
+ * Where `dist/` lives.
+ *
+ * Normally the repository root, one level above this file. A serverless bundle
+ * rearranges that — the handler is invoked from a task directory whose layout is
+ * the platform's business, not ours — so fall back to the working directory when
+ * the build output is not where the module path says it should be. Getting this
+ * wrong is a 500 on every request with a stack trace that blames a missing file
+ * rather than a wrong prefix.
+ */
+const ROOT = (() => {
+  const candidates = [
+    resolve(fileURLToPath(new URL('..', import.meta.url))),
+    process.cwd(),
+  ]
+  return candidates.find((dir) => existsSync(join(dir, 'dist/client/index.html'))) ?? candidates[0]!
+})()
 const IS_PRODUCTION = process.env.NODE_ENV === 'production'
 const PORT = Number.parseInt(process.env.PORT ?? '5174', 10)
 const ROOT_DOMAIN = process.env.APP_ROOT_DOMAIN ?? process.env.VITE_APP_ROOT_DOMAIN ?? 'selld.ph'
@@ -107,6 +123,32 @@ interface Assets {
  * script and stylesheet URLs.
  */
 type TransformHtml = (url: string, html: string) => Promise<string>
+
+/**
+ * Build a request handler without listening on a port.
+ *
+ * Serverless hosts import a module and call a function per request; there is no
+ * process to own a socket, and the background loops below would each be started
+ * and frozen again on every invocation. So the wiring is split: this returns the
+ * handler, `main()` adds the socket and the workers.
+ */
+export async function createRequestHandler(): Promise<
+  (request: IncomingMessage, response: ServerResponse) => Promise<void>
+> {
+  const supabase = readSupabaseConfig()
+  if (supabase === null) throw new Error('Missing SUPABASE_URL / SUPABASE_ANON_KEY')
+
+  const { loadRenderer, assets, middlewares, transformHtml } = await productionSetup()
+  initTelemetry(
+    process.env.SENTRY_DSN === undefined || process.env.SENTRY_DSN === ''
+      ? null
+      : { dsn: process.env.SENTRY_DSN, environment: process.env.VITE_APP_ENV ?? 'production' },
+  )
+  registerMarketplaceProviders()
+
+  return (request, response) =>
+    handle(request, response, { supabase, loadRenderer, assets, middlewares, transformHtml })
+}
 
 async function main() {
   const supabase = readSupabaseConfig()
@@ -227,8 +269,7 @@ async function productionSetup(): Promise<{
   const manifestPath = join(ROOT, 'dist/client/.vite/manifest.json')
 
   if (!existsSync(serverEntry) || !existsSync(manifestPath)) {
-    console.error('Build output missing. Run `pnpm build` first.')
-    process.exit(1)
+    throw new Error(`Build output missing under ${ROOT}. Run \`pnpm build\` first.`)
   }
 
   const renderer = (await import(serverEntry)) as unknown as Renderer
@@ -236,8 +277,7 @@ async function productionSetup(): Promise<{
 
   const entryKey = 'src/storefront/entry-client.tsx'
   if (manifest[entryKey] === undefined) {
-    console.error('Storefront entry missing from the Vite manifest.')
-    process.exit(1)
+    throw new Error('Storefront entry missing from the Vite manifest.')
   }
 
   const cssFiles = collectCss(manifest, entryKey)
@@ -245,11 +285,10 @@ async function productionSetup(): Promise<{
     // Fail loudly. An unstyled storefront still returns 200 and still contains
     // every word of its content, so nothing downstream notices — and this exact
     // bug shipped once already, because the entry's own `css` array is empty.
-    console.error(
+    throw new Error(
       `No stylesheet reachable from ${entryKey} in the Vite manifest. ` +
         'The storefront would render unstyled.',
     )
-    process.exit(1)
   }
 
   const styles = cssFiles.map((file) => `/${file}`)
@@ -1191,4 +1230,21 @@ function sendText(
   response.end(payload)
 }
 
-void main()
+/**
+ * Only when this file *is* the process.
+ *
+ * Importing it — which a serverless entry point does — must not bind a port or
+ * start a background loop. `pnpm start` and `pnpm dev:store` both invoke it
+ * directly, so argv[1] is this file and the server comes up as before.
+ */
+const invokedDirectly = (() => {
+  const entry = process.argv[1]
+  if (entry === undefined) return false
+  try {
+    return resolve(entry) === fileURLToPath(import.meta.url)
+  } catch {
+    return false
+  }
+})()
+
+if (invokedDirectly) void main()
