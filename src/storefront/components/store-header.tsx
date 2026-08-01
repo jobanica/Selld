@@ -32,7 +32,7 @@ export function StoreHeader({
 
   return (
     <header className="sticky top-0 z-40 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80">
-      <div className="mx-auto flex w-full max-w-6xl items-center gap-3 px-4 py-3">
+      <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center gap-x-3 gap-y-2 px-4 py-3">
         <a href={href('/')} className="flex min-w-0 items-center gap-2.5">
           {logo === null ? (
             <span
@@ -56,7 +56,7 @@ export function StoreHeader({
         </a>
 
         {showSearch && (
-          <form action={href('/')} method="get" role="search" className="ml-auto flex min-w-0 flex-1 justify-end">
+          <form action={href('/')} method="get" role="search" className="order-3 flex w-full min-w-0 basis-full sm:order-none sm:ml-auto sm:w-auto sm:basis-auto sm:max-w-md sm:flex-1">
             {/* Keep the category filter when searching within it. */}
             {activeCategory !== null && <input type="hidden" name="category" value={activeCategory} />}
             <label className="sr-only" htmlFor="store-search">
@@ -69,7 +69,7 @@ export function StoreHeader({
               defaultValue={search}
               placeholder={t('storefront.searchPlaceholder')}
               // 44px min touch target, per the mobile-first rule.
-              className="h-11 w-full max-w-[10rem] rounded-full border bg-background px-4 text-sm focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none sm:max-w-xs"
+              className="h-11 w-full rounded-full border bg-muted/50 px-4 text-sm focus-visible:bg-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none"
             />
           </form>
         )}
