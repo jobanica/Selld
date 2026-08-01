@@ -911,6 +911,15 @@ one new file plus one registry line, and zero lines of order logic.
   The count is read only when a cart cookie is present, and a response carrying
   one goes out `no-store, private`; every first visit and every crawler still
   gets the cacheable document, which is the traffic the LCP budget is for.
+- **And `Cache-Control` on the *response* is too late — the cache key is
+  computed on the *request*.** The edge decides what to serve before the
+  function runs, and by default that key ignores cookies, so a buyer with a cart
+  kept getting the cookie-less document an earlier visitor had cached. Correct
+  in the function, wrong on the deployment, and invisible locally where there is
+  no CDN: `x-vercel-cache: HIT` with an empty badge, the same URL with a
+  cache-buster returning `no-store, private` and the real count. `Vary: Cookie`
+  is what puts it in the key. **Verify a caching change against the deployment,
+  not `pnpm dev:store`** — the thing being changed does not exist locally.
 - **Feedback for a form post has to survive the redirect.** There is no
   client-side router here, so by the time the buyer sees anything, the event
   that would trigger an animation is two requests in the past. `selld_bump` is a
