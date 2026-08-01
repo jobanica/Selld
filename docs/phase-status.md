@@ -16,16 +16,16 @@ phase's scope and done-when criteria.
 | 8 | Payments | ✅ Complete |
 | 9 | Order management dashboard | ✅ Complete |
 | 10 | Courier integration | ✅ Complete |
-| 11 | Tracking & buyer notifications | ⬜ Next |
-| 12 | COD reconciliation & RTS control | ⬜ |
-| 13 | Live selling capture | ⬜ |
-| 14 | Messenger & social integration | ⬜ |
-| 15 | Customers & CRM | ⬜ |
-| 16 | Broadcasts, vouchers & abandoned cart | ⬜ |
-| 17 | Marketplace sync | ⬜ |
-| 18 | Analytics & true profit | ⬜ |
-| 19 | Billing, super admin & white-label | ⬜ |
-| 20 | Hardening & launch | ⬜ |
+| 11 | Tracking & buyer notifications | ✅ Complete |
+| 12 | COD reconciliation & RTS control | ✅ Complete |
+| 13 | Live selling capture | ✅ Complete |
+| 14 | Messenger & social integration | ✅ Complete |
+| 15 | Customers & CRM | ✅ Complete |
+| 16 | Broadcasts, vouchers & abandoned cart | ✅ Complete |
+| 17 | Marketplace sync | ✅ Complete |
+| 18 | Analytics & true profit | ✅ Complete |
+| 19 | Billing, super admin & white-label | ✅ Complete |
+| 20 | Hardening & launch | ⬜ Next |
 
 Phases 0–9 are a complete sellable product. MVP for first paying customers is
 0 → 11.
@@ -1804,3 +1804,99 @@ and a payday ad campaign:
 **Gate:** `pnpm verify` (517 tests), `pnpm db:test` (660 assertions),
 `pnpm db:test:concurrency`. All 23 migrations apply from scratch on PG 17.6.
 Eleven sabotages of the phase-18 arithmetic, each caught by the probe.
+
+---
+
+## Phase 19 — Billing, super admin & white-label
+
+**Done-when criterion**
+
+> A reseller can onboard and bill their own seller without you touching anything.
+
+**Measured, end to end, in a real browser at 390px** (`p19-ui.mjs`). Selld signs
+the partner up once. Everything after that is somebody else:
+
+| Who | What they did | Result |
+|---|---|---|
+| the partner, on their phone | wrote their own plan | `basic`, ₱899 — in their own code namespace, not colliding with Selld's |
+| the partner | onboarded a seller at a discount | Dahlia Shop, ₱799, invite link handed straight back to them |
+| the seller, on their phone | opened the link, accepted | owns the store; has never met Selld |
+| the seller | opened billing | "Your Selld account is managed by Bulaklak Partners", ₱799/mo |
+| the biller, on its timer | raised the invoice at the gateway | ₱799 billed, ₱199.75 recorded as Selld's cut **at issue time** |
+| the biller, run twice | — | still one invoice; a worker restart is not an extra month |
+| the gateway | posted the callback | subscription `active`, period rolled, invoice `paid` — in 2.5s |
+| the gateway, again | redelivered it | nothing changed |
+| the partner | reloaded their console | **₱599.25** — 799 less Selld's 25% |
+| the seller, over their limit | tried to add a product | "You have reached the number of products your plan allows." |
+
+The last row is the one worth reading twice: the ceiling is a *trigger*, so it
+holds for a `curl` with the anon key, and the seller is told which plan rather
+than "something went wrong".
+
+### What shipped
+
+- **Plans, subscriptions, invoices and credit purchases**, with a status ladder
+  that is the dunning design: `trialing → active → past_due` (**full access** —
+  a card that bounced on a Tuesday is usually a card) `→ restricted` (cannot add
+  products or staff; the storefront keeps working) `→ cancelled` (data kept;
+  nothing is deleted by billing, ever).
+- **Limits enforced in the database, not on a screen.** Product and seat ceilings
+  are triggers; feature gates sit on `live_sessions`, `broadcasts` and
+  `marketplace_connections` rather than inside the four functions that reach
+  them, so they hold on every path including ones phase 20 has not written yet.
+- **The exception, stated once and tested twice.** A monthly order ceiling
+  applies to `source = 'manual'` only. A buyer's checkout must never fail because
+  of the seller's billing status: they have never heard of Selld, cannot fix it,
+  and blocking them costs the seller the sale — which makes them cancel rather
+  than upgrade. Asserted by the probe, by the tenancy suite, and by a CI step.
+- **Xendit recurring billing and dunning**, split the way phase 16's sender and
+  phase 17's stock push are: `billing_due_claim` writes the invoice row *before*
+  returning it, the Node loop calls the gateway, `billing_invoice_settle` decides
+  what a payment or a failure does. Idempotent on `xendit_invoice_id`.
+- **SMS credit packs**, granted on payment rather than on intent.
+- **Impersonation as a written record first and an access grant second.**
+  `impersonate_begin()` inserts the audit row and returns its id; `is_impersonating()`
+  reads that row. There is no way to gain the access without leaving the record,
+  because the record *is* the access. Sessions expire in an hour, the table is
+  append-only for everybody including the actor, and the **seller can read their
+  own store's rows** — the accountability is to them, not to us.
+- **Super admin**: MRR normalised to a month, churn with its denominator beside
+  it, every store with plan and usage, manual plan override (reason required,
+  logged where the seller can see it), announcement banners.
+- **White label**: resellers own sub-tenants, set their own plans and per-seller
+  prices, brand the dashboard, and read a revenue split built from *paid*
+  invoices only.
+
+### Notable findings
+
+| Symptom | Cause |
+|---|---|
+| Every seller invitation failed with "permission denied for function plan_limit" | A trigger function runs as the *invoker*. The limit guards call `plan_limit()`, which is granted to nobody on purpose, so every ordinary write raised. They are `SECURITY DEFINER` now — which is also the correct right, since a count taken under the caller's RLS is a count of the rows that caller can see. |
+| A plan limit reached the seller as "Something went wrong" | `describe()` in the product form ended in `cause instanceof Error ? … : t('errors.unexpected')`, and a PostgREST error is a plain object. The third appearance of that trap in this codebase. |
+| The limit matcher never fired even once fixed | It matched on the `hint` — which PostgREST returns as its own JSON field, so `errorMessage()` never sees it. `errorHint()` now exists. |
+| A gateway outage would have unbilled a store forever | An invoice raised but never attached is `open`, and the claim skipped any period with an open invoice. `billing_due_claim` now re-emits unattached invoices, and a gateway failure is recorded as an attempt rather than as `failed` — `failed` means the *seller's* payment did not go through, and starts the dunning clock. |
+| The sabotage sweep could not break `reseller_set_price` | It returned `subscription_overview()`, whose own membership check raised and rolled the write back — two guards for one rule, so deleting the real one changed nothing observable. It builds its own answer now. |
+| Half the probe's RLS assertions were passing without RLS | The probe ran as `postgres`, which has BYPASSRLS. `p19.login()` now does `set local role authenticated` as well as setting the claims. |
+| A partner could not reach their own console | `RequireAuth` sends a user with no tenant to "create your store", and a reseller legitimately owns none. `requireTenant={false}` and a separate console shell. |
+
+### Deliberately deferred
+
+- **Selld collects centrally**, and the revenue split is reported rather than
+  paid out. Handing each partner their own gateway keys is one secret per
+  partner and a step to wait on — which is precisely the step the done-when is
+  about not having. Payouts are an operations problem, not a schema one.
+- **No proration on a mid-cycle upgrade.** The plan changes immediately and the
+  price applies from the next invoice. Charging a partial month correctly means
+  credit notes, and a seller who upgrades mid-month is not the person to
+  introduce those to.
+- **Reseller branding is name, colour, logo and support email.** Custom domains
+  for a partner's dashboard are a certificate story, which belongs in phase 20.
+- **`platform_admins` is populated by migration or service role only.** There is
+  no screen for adding Selld staff, on purpose: a table that can grant membership
+  of itself is the shortest privilege-escalation path in any product.
+
+**Gate:** `pnpm verify` (523 tests), `pnpm db:test` (706 assertions),
+`pnpm db:test:concurrency`. All 24 migrations apply from scratch on PG 17.6.
+Twenty-five sabotages of the phase-19 guards, every one caught by the probe —
+after four of them came back green and turned out to be gaps in the probe, not
+guards that held.

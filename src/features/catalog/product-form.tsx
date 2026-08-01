@@ -7,9 +7,11 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select } from '@/components/ui/select'
+import { describePlanLimitError } from '@/features/billing/billing-api'
 import { useActiveTenant } from '@/features/tenancy/use-tenant'
 import type { Translate } from '@/lib/i18n'
 import { centavos, parsePesos, type Centavos } from '@/lib/money'
+import { errorMessage } from '@/lib/supabase/errors'
 
 import { fetchCategories, fetchProduct, saveProduct, type ProductStatus } from './catalog-api'
 import { VariantGrid } from './variant-grid'
@@ -391,7 +393,17 @@ function describe(cause: unknown, t: Translate): string {
         ? t('catalog.duplicateOption')
         : cause.message
   }
-  return cause instanceof Error ? cause.message : t('errors.unexpected')
+  // Phase 19: the product ceiling is a trigger, so it rejects *here*, on the form
+  // the seller is looking at. Without this the plan limit arrives as a plain
+  // PostgREST object, fails the `instanceof Error` test below, and reads as
+  // "Something went wrong" — which sends the seller to look for a bug in the
+  // product form rather than at their plan.
+  const planLimit = describePlanLimitError(cause)
+  if (planLimit !== null) return t(planLimit as 'billing.limitProducts')
+
+  if (cause instanceof Error) return cause.message
+  const message = errorMessage(cause)
+  return message === '' ? t('errors.unexpected') : message
 }
 
 /** Re-exported for the grid's price sync, which needs the branded type. */

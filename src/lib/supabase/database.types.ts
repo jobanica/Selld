@@ -181,6 +181,63 @@ export type Database = {
           },
         ]
       }
+      announcements: {
+        Row: {
+          body: string
+          created_at: string
+          created_by: string | null
+          ends_at: string | null
+          id: string
+          is_active: boolean
+          level: string
+          reseller_id: string | null
+          starts_at: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          body: string
+          created_at?: string
+          created_by?: string | null
+          ends_at?: string | null
+          id?: string
+          is_active?: boolean
+          level?: string
+          reseller_id?: string | null
+          starts_at?: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          body?: string
+          created_at?: string
+          created_by?: string | null
+          ends_at?: string | null
+          id?: string
+          is_active?: boolean
+          level?: string
+          reseller_id?: string | null
+          starts_at?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "announcements_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "announcements_reseller_id_fkey"
+            columns: ["reseller_id"]
+            isOneToOne: false
+            referencedRelation: "resellers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       auto_replies: {
         Row: {
           body: string
@@ -1037,6 +1094,60 @@ export type Database = {
           },
         ]
       }
+      credit_purchases: {
+        Row: {
+          amount_centavos: number
+          checkout_url: string | null
+          created_at: string
+          credits: number
+          id: string
+          paid_at: string | null
+          status: string
+          tenant_id: string
+          updated_at: string
+          xendit_invoice_id: string | null
+        }
+        Insert: {
+          amount_centavos: number
+          checkout_url?: string | null
+          created_at?: string
+          credits: number
+          id?: string
+          paid_at?: string | null
+          status?: string
+          tenant_id: string
+          updated_at?: string
+          xendit_invoice_id?: string | null
+        }
+        Update: {
+          amount_centavos?: number
+          checkout_url?: string | null
+          created_at?: string
+          credits?: number
+          id?: string
+          paid_at?: string | null
+          status?: string
+          tenant_id?: string
+          updated_at?: string
+          xendit_invoice_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "credit_purchases_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "credit_purchases_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       customer_addresses: {
         Row: {
           barangay_code: string
@@ -1494,6 +1605,61 @@ export type Database = {
           },
           {
             foreignKeyName: "discounts_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      impersonation_sessions: {
+        Row: {
+          actor_id: string
+          actor_kind: string
+          ended_at: string | null
+          expires_at: string
+          id: string
+          reason: string
+          started_at: string
+          tenant_id: string
+        }
+        Insert: {
+          actor_id: string
+          actor_kind: string
+          ended_at?: string | null
+          expires_at?: string
+          id?: string
+          reason: string
+          started_at?: string
+          tenant_id: string
+        }
+        Update: {
+          actor_id?: string
+          actor_kind?: string
+          ended_at?: string | null
+          expires_at?: string
+          id?: string
+          reason?: string
+          started_at?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "impersonation_sessions_actor_id_fkey"
+            columns: ["actor_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "impersonation_sessions_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "impersonation_sessions_tenant_id_fkey"
             columns: ["tenant_id"]
             isOneToOne: false
             referencedRelation: "tenants"
@@ -3430,6 +3596,91 @@ export type Database = {
           },
         ]
       }
+      plans: {
+        Row: {
+          code: string
+          created_at: string
+          description: string | null
+          id: string
+          interval_months: number
+          is_active: boolean
+          is_public: boolean
+          limits: Json
+          name: string
+          price_centavos: number
+          reseller_id: string | null
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          code: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          interval_months?: number
+          is_active?: boolean
+          is_public?: boolean
+          limits?: Json
+          name: string
+          price_centavos?: number
+          reseller_id?: string | null
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          code?: string
+          created_at?: string
+          description?: string | null
+          id?: string
+          interval_months?: number
+          is_active?: boolean
+          is_public?: boolean
+          limits?: Json
+          name?: string
+          price_centavos?: number
+          reseller_id?: string | null
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "plans_reseller_fk"
+            columns: ["reseller_id"]
+            isOneToOne: false
+            referencedRelation: "resellers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      platform_admins: {
+        Row: {
+          created_at: string
+          note: string | null
+          role: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          note?: string | null
+          role?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          note?: string | null
+          role?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "platform_admins_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: true
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       platform_secrets: {
         Row: {
           created_at: string
@@ -4098,6 +4349,93 @@ export type Database = {
           island_group?: string
           name?: string
           region_name?: string
+        }
+        Relationships: []
+      }
+      reseller_members: {
+        Row: {
+          created_at: string
+          id: string
+          reseller_id: string
+          role: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          reseller_id: string
+          role?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          reseller_id?: string
+          role?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "reseller_members_reseller_id_fkey"
+            columns: ["reseller_id"]
+            isOneToOne: false
+            referencedRelation: "resellers"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "reseller_members_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      resellers: {
+        Row: {
+          brand_color: string | null
+          brand_name: string | null
+          commission_bps: number
+          contact_email: string | null
+          contact_phone: string | null
+          created_at: string
+          id: string
+          logo_path: string | null
+          name: string
+          slug: string
+          status: string
+          support_email: string | null
+          updated_at: string
+        }
+        Insert: {
+          brand_color?: string | null
+          brand_name?: string | null
+          commission_bps?: number
+          contact_email?: string | null
+          contact_phone?: string | null
+          created_at?: string
+          id?: string
+          logo_path?: string | null
+          name: string
+          slug: string
+          status?: string
+          support_email?: string | null
+          updated_at?: string
+        }
+        Update: {
+          brand_color?: string | null
+          brand_name?: string | null
+          commission_bps?: number
+          contact_email?: string | null
+          contact_phone?: string | null
+          created_at?: string
+          id?: string
+          logo_path?: string | null
+          name?: string
+          slug?: string
+          status?: string
+          support_email?: string | null
+          updated_at?: string
         }
         Relationships: []
       }
@@ -4983,6 +5321,155 @@ export type Database = {
           },
         ]
       }
+      subscription_invoices: {
+        Row: {
+          amount_centavos: number
+          attempts: number
+          checkout_url: string | null
+          created_at: string
+          failed_at: string | null
+          id: string
+          last_error: string | null
+          paid_at: string | null
+          period_end: string
+          period_start: string
+          platform_cut_centavos: number
+          status: string
+          subscription_id: string
+          tenant_id: string
+          updated_at: string
+          xendit_invoice_id: string | null
+        }
+        Insert: {
+          amount_centavos: number
+          attempts?: number
+          checkout_url?: string | null
+          created_at?: string
+          failed_at?: string | null
+          id?: string
+          last_error?: string | null
+          paid_at?: string | null
+          period_end: string
+          period_start: string
+          platform_cut_centavos?: number
+          status?: string
+          subscription_id: string
+          tenant_id: string
+          updated_at?: string
+          xendit_invoice_id?: string | null
+        }
+        Update: {
+          amount_centavos?: number
+          attempts?: number
+          checkout_url?: string | null
+          created_at?: string
+          failed_at?: string | null
+          id?: string
+          last_error?: string | null
+          paid_at?: string | null
+          period_end?: string
+          period_start?: string
+          platform_cut_centavos?: number
+          status?: string
+          subscription_id?: string
+          tenant_id?: string
+          updated_at?: string
+          xendit_invoice_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "subscription_invoices_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "subscription_invoices_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "subscription_invoices_tenant_id_subscription_id_fkey"
+            columns: ["tenant_id", "subscription_id"]
+            isOneToOne: false
+            referencedRelation: "subscriptions"
+            referencedColumns: ["tenant_id", "id"]
+          },
+        ]
+      }
+      subscriptions: {
+        Row: {
+          cancel_at: string | null
+          cancelled_at: string | null
+          created_at: string
+          current_period_end: string
+          current_period_start: string
+          grace_ends_at: string | null
+          id: string
+          plan_id: string
+          price_centavos: number
+          status: string
+          tenant_id: string
+          trial_ends_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          cancel_at?: string | null
+          cancelled_at?: string | null
+          created_at?: string
+          current_period_end?: string
+          current_period_start?: string
+          grace_ends_at?: string | null
+          id?: string
+          plan_id: string
+          price_centavos?: number
+          status?: string
+          tenant_id: string
+          trial_ends_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          cancel_at?: string | null
+          cancelled_at?: string | null
+          created_at?: string
+          current_period_end?: string
+          current_period_start?: string
+          grace_ends_at?: string | null
+          id?: string
+          plan_id?: string
+          price_centavos?: number
+          status?: string
+          tenant_id?: string
+          trial_ends_at?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "subscriptions_plan_id_fkey"
+            columns: ["plan_id"]
+            isOneToOne: false
+            referencedRelation: "plans"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "subscriptions_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: true
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "subscriptions_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: true
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       tenant_members: {
         Row: {
           accepted_at: string | null
@@ -5083,6 +5570,7 @@ export type Database = {
           locale: string
           logo_path: string | null
           name: string
+          reseller_id: string | null
           slug: string
           status: string
           timezone: string
@@ -5096,6 +5584,7 @@ export type Database = {
           locale?: string
           logo_path?: string | null
           name: string
+          reseller_id?: string | null
           slug: string
           status?: string
           timezone?: string
@@ -5109,12 +5598,21 @@ export type Database = {
           locale?: string
           logo_path?: string | null
           name?: string
+          reseller_id?: string | null
           slug?: string
           status?: string
           timezone?: string
           updated_at?: string
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "tenants_reseller_id_fkey"
+            columns: ["reseller_id"]
+            isOneToOne: false
+            referencedRelation: "resellers"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       webhook_events: {
         Row: {
@@ -5850,6 +6348,7 @@ export type Database = {
         Args: { p_months?: number; p_tenant_id: string }
         Returns: Json
       }
+      announcements_active: { Args: { p_tenant_id: string }; Returns: Json }
       apply_reservation: {
         Args: { p_items: Json; p_location_id: string; p_tenant_id: string }
         Returns: undefined
@@ -5890,6 +6389,30 @@ export type Database = {
       available_stock: {
         Args: { p_on_hand: number; p_reserved: number }
         Returns: number
+      }
+      billing_allows_writes: { Args: { p_tenant_id: string }; Returns: boolean }
+      billing_due_claim: { Args: { p_limit?: number }; Returns: Json }
+      billing_dunning_run: { Args: never; Returns: Json }
+      billing_invoice_attach: {
+        Args: {
+          p_checkout_url: string
+          p_external_id: string
+          p_invoice_id: string
+        }
+        Returns: undefined
+      }
+      billing_invoice_note_failure: {
+        Args: { p_error: string; p_invoice_id: string }
+        Returns: undefined
+      }
+      billing_invoice_settle: {
+        Args: {
+          p_error?: string
+          p_external_id: string
+          p_paid_at?: string
+          p_status: string
+        }
+        Returns: boolean
       }
       broadcast_channel_for: {
         Args: { p_channel?: string; p_customer_id: string }
@@ -6098,6 +6621,7 @@ export type Database = {
           locale: string
           logo_path: string | null
           name: string
+          reseller_id: string | null
           slug: string
           status: string
           timezone: string
@@ -6110,6 +6634,24 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      credit_pack_price: { Args: { p_credits: number }; Returns: number }
+      credit_purchase_attach: {
+        Args: {
+          p_checkout_url: string
+          p_external_id: string
+          p_purchase_id: string
+        }
+        Returns: undefined
+      }
+      credit_purchase_settle: {
+        Args: { p_external_id: string; p_paid_at?: string; p_status: string }
+        Returns: boolean
+      }
+      credit_purchase_start: {
+        Args: { p_credits: number; p_tenant_id: string }
+        Returns: Json
+      }
+      current_reseller: { Args: never; Returns: string }
       current_tenant_id: { Args: never; Returns: string }
       customer_profile: { Args: { p_customer_id: string }; Returns: Json }
       customer_segment_count: {
@@ -6225,6 +6767,11 @@ export type Database = {
         Returns: boolean
       }
       image_widths_are_sane: { Args: { p_widths: number[] }; Returns: boolean }
+      impersonate_begin: {
+        Args: { p_actor_id: string; p_reason: string; p_tenant_id: string }
+        Returns: Json
+      }
+      impersonate_end: { Args: { p_session_id: string }; Returns: undefined }
       inbox_mark_read: { Args: { p_thread_id: string }; Returns: undefined }
       inbox_thread: {
         Args: { p_limit?: number; p_thread_id: string }
@@ -6234,6 +6781,9 @@ export type Database = {
         Args: { p_limit?: number; p_status?: string; p_tenant_id: string }
         Returns: Json
       }
+      is_impersonating: { Args: { p_tenant_id: string }; Returns: boolean }
+      is_platform_admin: { Args: never; Returns: boolean }
+      is_reseller_of: { Args: { p_tenant_id: string }; Returns: boolean }
       is_reserved_tenant_slug: { Args: { slug: string }; Returns: boolean }
       is_tenant_member: { Args: { p_tenant_id: string }; Returns: boolean }
       is_valid_tenant_slug: { Args: { slug: string }; Returns: boolean }
@@ -6378,6 +6928,7 @@ export type Database = {
         Args: { p_automated?: boolean; p_tag?: string; p_thread_id: string }
         Returns: Json
       }
+      my_platform_roles: { Args: never; Returns: Json }
       my_tenants: {
         Args: never
         Returns: {
@@ -6452,6 +7003,54 @@ export type Database = {
       }
       ph_national_digits: { Args: { p_input: string }; Returns: string }
       ph_phone_e164: { Args: { p_input: string }; Returns: string }
+      plan_has_feature: {
+        Args: { p_feature: string; p_tenant_id: string }
+        Returns: boolean
+      }
+      plan_is_visible: { Args: { p_reseller_id: string }; Returns: boolean }
+      plan_limit: {
+        Args: { p_key: string; p_tenant_id: string }
+        Returns: number
+      }
+      platform_announce: {
+        Args: {
+          p_body: string
+          p_ends_at?: string
+          p_level?: string
+          p_reseller_id?: string
+          p_title: string
+        }
+        Returns: string
+      }
+      platform_create_reseller: {
+        Args: {
+          p_commission_bps?: number
+          p_name: string
+          p_owner_email: string
+          p_slug: string
+        }
+        Returns: Json
+      }
+      platform_impersonation_log: { Args: { p_limit?: number }; Returns: Json }
+      platform_overview: { Args: never; Returns: Json }
+      platform_set_plan: {
+        Args: {
+          p_note?: string
+          p_plan_id: string
+          p_status?: string
+          p_tenant_id: string
+        }
+        Returns: Json
+      }
+      platform_tenants: {
+        Args: {
+          p_limit?: number
+          p_offset?: number
+          p_search?: string
+          p_status?: string
+        }
+        Returns: Json
+      }
       public_tracking: {
         Args: { p_domain: string; p_order_number: string; p_slug: string }
         Returns: Json
@@ -6646,6 +7245,47 @@ export type Database = {
       release_reservation_raw: {
         Args: { p_items: Json; p_location_id: string; p_tenant_id: string }
         Returns: undefined
+      }
+      reseller_branding: { Args: { p_tenant_id: string }; Returns: Json }
+      reseller_create_tenant: {
+        Args: {
+          p_name: string
+          p_owner_email: string
+          p_plan_id: string
+          p_price_centavos?: number
+          p_slug: string
+        }
+        Returns: Json
+      }
+      reseller_is_visible: { Args: { p_reseller_id: string }; Returns: boolean }
+      reseller_overview: { Args: never; Returns: Json }
+      reseller_plan_upsert: {
+        Args: {
+          p_code: string
+          p_description?: string
+          p_limits: Json
+          p_name: string
+          p_price_centavos: number
+        }
+        Returns: Json
+      }
+      reseller_require: { Args: { p_role?: string }; Returns: string }
+      reseller_revenue_split: {
+        Args: { p_from?: string; p_to?: string }
+        Returns: Json
+      }
+      reseller_set_branding: {
+        Args: {
+          p_brand_color?: string
+          p_brand_name?: string
+          p_logo_path?: string
+          p_support_email?: string
+        }
+        Returns: Json
+      }
+      reseller_set_price: {
+        Args: { p_price_centavos: number; p_tenant_id: string }
+        Returns: Json
       }
       reserve_stock: {
         Args: {
@@ -6849,6 +7489,14 @@ export type Database = {
         Args: { p_domain?: string; p_slug?: string }
         Returns: string
       }
+      subscription_cancel: { Args: { p_tenant_id: string }; Returns: Json }
+      subscription_change_plan: {
+        Args: { p_plan_id: string; p_tenant_id: string }
+        Returns: Json
+      }
+      subscription_overview: { Args: { p_tenant_id: string }; Returns: Json }
+      subscription_plans: { Args: { p_tenant_id: string }; Returns: Json }
+      subscription_resume: { Args: { p_tenant_id: string }; Returns: Json }
       sync_order_payment_status: {
         Args: { p_note?: string; p_order_id: string }
         Returns: string

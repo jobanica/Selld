@@ -5,7 +5,7 @@
 Multi-tenant ecommerce + order operations platform for Philippine social sellers.
 Working name: **Selld** (`selld.ph` / `selld.store`).
 
-> **Status: phase 18 (Analytics & true profit) complete.** Next: phase 19, billing, super admin & white-label.
+> **Status: phase 19 (Billing, super admin & white-label) complete.** Next: phase 20, hardening & launch.
 > See [`docs/phase-status.md`](docs/phase-status.md).
 
 ---
@@ -128,7 +128,7 @@ naive UTC date splits one Manila morning across two buckets.
 **Tenant isolation is enforced in the database, not the client.** Every
 tenant-scoped policy funnels through `is_tenant_member(tenant_id)`, and
 [`supabase/tests/tenancy-isolation.sql`](supabase/tests/tenancy-isolation.sql)
-proves cross-tenant reads and writes return nothing — 660 assertions, run in CI on
+proves cross-tenant reads and writes return nothing — 706 assertions, run in CI on
 every PR. The suite is verified by sabotage: break RLS and it fails. Read the
 "Writing a tenant-scoped table" section of [`CLAUDE.md`](CLAUDE.md) before adding
 a table.
@@ -159,6 +159,24 @@ with the short link and the buyer's first name in it, not the template with
 under-bill a long draft by half. Credits are moved per recipient *before* the
 message is handed to the provider, so a send interrupted halfway has spent
 exactly what went out, and a CI step asserts the quote and the freeze agree.
+
+**A buyer's checkout never fails because the seller has not paid us.** Plan
+limits are enforced in the database — product and seat ceilings as triggers,
+feature gates on the tables the features write to — so a `curl` with the anon key
+is bound by them too. The monthly *order* ceiling is the exception, and it is
+deliberate: it applies to orders the seller types in, never to a storefront, live
+or marketplace order. The buyer has never heard of Selld and cannot fix the
+seller's card; blocking them costs the seller the sale, and a seller who cannot
+take money cancels rather than upgrades. A CI step puts a store on a zero-order
+plan, restricts it, and checks a buyer still gets through.
+
+**Support acting as a seller leaves a record the seller can read.**
+`impersonate_begin()` writes the audit row and returns its id, and
+`is_impersonating()` reads that row — so the access is *derived from* the record
+and cannot be taken without leaving one. Sessions expire in an hour, the table is
+append-only for everybody including the actor, and the store's own members can
+select their rows. A log only we could read would be for our comfort rather than
+their protection.
 
 ## Documentation
 

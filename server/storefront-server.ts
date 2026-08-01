@@ -39,6 +39,12 @@ import {
   startMarketplaceWorker,
 } from './marketplace-routes'
 import { serveSocialRoutes, serveSocialWebhook } from './social-routes'
+import {
+  readPlatformBillingConfig,
+  serveBillingRoutes,
+  serveBillingWebhook,
+  startBillingWorker,
+} from './billing-routes'
 import { serveCourierWebhook } from './tracking'
 import { readSupabaseConfig, rpc, type SupabaseConfig } from './supabase-rpc'
 
@@ -139,6 +145,12 @@ async function main() {
   registerMarketplaceProviders()
   const service = readServiceConfig()
   if (service !== null) startMarketplaceWorker(service)
+
+  // Platform billing runs on the same loop, and is started only when Selld's own
+  // gateway credentials are present. A developer looking at a product page should
+  // not need the key that can charge cards.
+  const billing = readPlatformBillingConfig()
+  if (service !== null && billing !== null) startBillingWorker(service, billing)
 
   server.listen(PORT, () => {
     console.log(
@@ -334,6 +346,13 @@ async function handle(
   // Marketplace mapping and sync. A dashboard action needing server-held
   // credentials, like courier booking, so it lives here for the same reason.
   if (await serveMarketplaceRoutes(request, response, url)) return
+
+  // Selld's own billing: the callback for a seller's subscription or credit pack,
+  // and the one dashboard action that needs the platform gateway key. Before
+  // surface routing, like every other webhook — it arrives on the platform's
+  // hostname and has nothing to do with which store the host names.
+  if (await serveBillingWebhook(request, response, url.pathname)) return
+  if (await serveBillingRoutes(request, response, url)) return
 
   // `.localhost` subdomains resolve to 127.0.0.1 in every modern browser, so
   // `rheas-finds.localhost:5174` exercises the real subdomain path in dev.

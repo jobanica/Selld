@@ -5,7 +5,7 @@ Build one phase per session, in order. The full roadmap is in
 [`docs/build-spec.md`](docs/build-spec.md); who we're building for is in
 [`docs/avatar.md`](docs/avatar.md).
 
-**Current state: phase 18 complete.** Next up is phase 19 (billing, super admin & white-label).
+**Current state: phase 19 complete.** Next up is phase 20 (hardening & launch).
 
 ---
 
@@ -269,6 +269,33 @@ What follows from that:
   `authenticated`-only for the same reason `products_public` exists: the product
   breakdown carries `cost_centavos`, which is the seller's margin.
 
+- **Phase 19 adds the two widest boundaries in the schema, and neither is a
+  tenant.** A **platform admin** sees every store; a **reseller** sees the stores
+  it owns and no others (`tenants.reseller_id` + `is_reseller_of()`), and is
+  emphatically *not* a platform admin. `platform_admins` gets the
+  `social_accounts` treatment and for a sharper reason: those tables hold a
+  secret, this one holds *authority*, and a table a client can insert into is a
+  table that grants its own membership.
+- **Impersonation is a written record first and an access grant second.**
+  `impersonate_begin()` inserts the audit row and returns its id;
+  `is_impersonating()` reads that row. There is no way to gain the access without
+  leaving the record, because the record *is* what the access is derived from.
+  Sessions expire in an hour, the table is append-only for everybody including
+  the actor, and the **seller can read their own store's rows** — the
+  accountability is to them, not to us.
+- **Plan limits are enforced in the database, because here the API layer *is* the
+  database.** A limit checked in React is a limit a `curl` with the anon key
+  ignores. Product and seat ceilings are triggers; feature gates sit on
+  `live_sessions`, `broadcasts` and `marketplace_connections` rather than inside
+  the functions that reach them, so they hold on paths phase 20 has not written
+  yet. And **a buyer's checkout must never fail because of the seller's billing
+  status** — the order ceiling applies to `source = 'manual'` only. Punishing a
+  stranger for somebody else's overdue invoice costs the seller the sale, and a
+  seller who cannot take money cancels rather than upgrades. The dunning ladder
+  says the same thing: `past_due` keeps **full** access, `restricted` stops the
+  seller adding products and staff while the **storefront keeps working**, and
+  nothing is ever deleted by billing.
+
 **`cart_pricing()` is the only place money is computed.** The quote the buyer sees
 and the order that gets written both go through it, so they cannot disagree.
 `cart_items.unit_price_centavos` is a display snapshot and is never charged —
@@ -286,8 +313,8 @@ src/
   app/          ← dashboard (authenticated seller surface)
   storefront/   ← public buyer surface, own perf budget
   features/     ← feature slices; may import from core and lib
-    address/ analytics/ auth/ broadcasts/ catalog/ cod/ customers/ inbox/
-    inventory/ live/ marketplaces/ onboarding/ orders/ tenancy/
+    address/ analytics/ auth/ billing/ broadcasts/ catalog/ cod/ customers/
+    inbox/ inventory/ live/ marketplaces/ onboarding/ orders/ platform/ tenancy/
   lib/          ← money, phone, psgc, i18n, time, supabase, tenant
   components/ui ← shadcn/ui primitives
 ```
@@ -685,6 +712,45 @@ one new file plus one registry line, and zero lines of order logic.
   20 of the month" is the *next* Manila day, and a fixture built that way
   silently drops rows out of the window it is testing. Build
   `(d + time '09:00') at time zone 'Asia/Manila'` when you mean a Manila instant.
+- **A trigger function runs as the *invoker*.** Every phase-19 limit guard calls
+  `plan_limit()`, which is granted to nobody on purpose — so as a plain trigger
+  they raised `permission denied for function plan_limit` on every ordinary
+  `authenticated` write, and the first symptom was a seller unable to invite a
+  colleague. `SECURITY DEFINER` is also the *correct* right here for a second
+  reason: a limit counted under the caller's RLS is a count of the rows that
+  caller can see.
+- **A PostgREST `hint` is not inside `message`.** It arrives as its own JSON
+  field, so a matcher built on `errorMessage()` alone never sees it — and a hint
+  is exactly the machine-readable channel a `raise ... using hint = '…'` exists to
+  provide. Use `errorHint()` from `src/lib/supabase/errors.ts` and match on both:
+  the hint is a contract, the message is prose somebody will improve.
+- **`describe(cause)` ending in `cause instanceof Error ? … : t('errors.unexpected')`
+  is the same trap as `describeStockError`, for the third time.** A plan limit is
+  raised by a trigger and reaches the product form as a plain object, so the
+  seller was told "Something went wrong" for hitting their plan — which sends
+  them to look for a bug in the form rather than at their billing.
+- **An invoice raised but never attached is a store that is never billed again.**
+  The claim skipped any period that already had an `open` invoice, so one gateway
+  timeout meant silence forever for that seller. `billing_due_claim` re-emits
+  unattached invoices, and a gateway failure is recorded as an *attempt* rather
+  than as `failed` — `failed` means the seller's payment did not go through, and
+  starts the dunning clock. Our outage must not put a store into `past_due`.
+- **A function that ends by returning a checked helper has two guards for one
+  rule.** `reseller_set_price` returned `subscription_overview()`, whose own
+  membership check raised and rolled the write back — so deleting the real
+  ownership check changed nothing observable and the sabotage sweep could not
+  break it. Build the answer locally when the rule is yours to enforce.
+- **A SQL probe that does not `set local role authenticated` is a probe with no
+  RLS in it.** `postgres` has BYPASSRLS, so every policy assertion passes by not
+  being applied. Setting `request.jwt.claims` alone is not enough — that only
+  changes who `auth.uid()` says you are, not whether policies run.
+- **A boolean sabotage must replace the whole condition.** `if false and A or B`
+  parses as `(false and A) or B`, so anchoring on the first line of a multi-term
+  guard disables nothing and the sweep reports a guard it never removed.
+- **`RequireAuth` sends a user with no tenant to "create your store".** A
+  white-label partner legitimately owns none — they sell stores — so the partner
+  console needs `requireTenant={false}` and its own shell. Worth checking for any
+  future surface whose user is not a seller.
 - **A coverage ratio has to compare like with like.** `costedFraction` measured
   item line totals against order grand totals, which carry shipping and COD fees
   no line accounts for — so a store with perfect cost data still read 97% and

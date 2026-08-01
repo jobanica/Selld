@@ -6,6 +6,7 @@ import { NavLink, Outlet } from 'react-router-dom'
 import { LocaleSwitcher } from '@/components/locale-switcher'
 import { Button } from '@/components/ui/button'
 import { NAV_SECTIONS } from '@/app/navigation'
+import { AnnouncementBanner } from '@/features/billing/announcement-banner'
 import { UserMenu } from '@/features/auth/user-menu'
 import { TenantSwitcher } from '@/features/tenancy/tenant-switcher'
 import { cn } from '@/lib/utils'
@@ -88,6 +89,10 @@ export function DashboardLayout() {
         <Sidebar id="dashboard-sidebar" open={drawerOpen} onNavigate={closeDrawer} />
 
         <main className="min-w-0 flex-1 px-3 py-5 sm:px-6 lg:px-8">
+          {/* Above the page, never inside it: a billing state that stops the
+              seller adding products has to be visible from whichever screen they
+              were on when it started stopping them. */}
+          <AnnouncementBanner />
           <Outlet />
         </main>
       </div>

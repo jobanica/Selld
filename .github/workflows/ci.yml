@@ -321,7 +321,21 @@ jobs:
                 'marketplace_map_listing', 'marketplace_overview',
                 'marketplace_issue_resolve',
                 'analytics_profit', 'analytics_commission_kept', 'analytics_breakdown',
-                'analytics_trends', 'ad_spend_record', 'ad_spend_list'
+                'analytics_trends', 'ad_spend_record', 'ad_spend_list',
+                'plan_limit', 'plan_has_feature', 'billing_allows_writes',
+                'billing_due_claim', 'billing_invoice_attach', 'billing_invoice_settle',
+                'billing_invoice_note_failure', 'billing_dunning_run',
+                'credit_purchase_start', 'credit_purchase_attach', 'credit_purchase_settle',
+                'subscription_overview', 'subscription_plans', 'subscription_change_plan',
+                'subscription_cancel', 'subscription_resume',
+                'impersonate_begin', 'impersonate_end', 'is_impersonating',
+                'is_platform_admin', 'is_reseller_of', 'current_reseller',
+                'plan_is_visible', 'reseller_is_visible', 'reseller_require',
+                'platform_overview', 'platform_tenants', 'platform_set_plan',
+                'platform_impersonation_log', 'platform_announce', 'platform_create_reseller',
+                'reseller_plan_upsert', 'reseller_create_tenant', 'reseller_set_price',
+                'reseller_overview', 'reseller_revenue_split', 'reseller_set_branding',
+                'reseller_branding', 'announcements_active', 'my_platform_roles'
               ]
               loop
                 if exists (
@@ -386,7 +400,10 @@ jobs:
                 'marketplace_credentials', 'set_marketplace_credentials',
                 'marketplace_push_claim', 'marketplace_push_record',
                 'marketplace_order_ingest', 'marketplace_listings_import',
-                'marketplace_connections_due', 'marketplace_sellable'
+                'marketplace_connections_due', 'marketplace_sellable',
+                'billing_due_claim', 'billing_invoice_attach', 'billing_invoice_settle',
+                'billing_invoice_note_failure', 'billing_dunning_run',
+                'credit_purchase_attach', 'credit_purchase_settle', 'impersonate_begin'
               ]
               loop
                 if exists (
@@ -1066,6 +1083,195 @@ jobs:
                   array_to_string(bad, ', ');
               end if;
               raise notice 'no composite FK nulls a NOT NULL column OK';
+            end
+            \$\$;
+          "
+
+      # Billing state is what the seller is charged and what they are allowed to
+      # do. A client role that can write any of it can set its own status to
+      # active, its own price to zero, or grant itself ten thousand SMS credits —
+      # so every table in phase 19 is read-only to every client role, and
+      # `platform_admins` is not even readable. There is no policy on that one on
+      # purpose: a table that can grant membership of itself is the shortest
+      # privilege-escalation path in any product.
+      - name: A seller cannot write their own billing state
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h 127.0.0.1 -p 54322 -U postgres -v ON_ERROR_STOP=1 -c "
+            do \$\$
+            declare
+              r text;
+              t text;
+              w text;
+              leaked text[] := '{}';
+            begin
+              foreach r in array array['anon', 'authenticated'] loop
+                foreach t in array array[
+                  'plans', 'resellers', 'reseller_members', 'subscriptions',
+                  'subscription_invoices', 'credit_purchases', 'announcements',
+                  'impersonation_sessions'
+                ] loop
+                  foreach w in array array['INSERT', 'UPDATE', 'DELETE'] loop
+                    if has_table_privilege(r, 'public.' || t, w) then
+                      leaked := leaked || (r || ' can ' || w || ' ' || t)::text;
+                    end if;
+                  end loop;
+                end loop;
+
+                -- Nothing at all on the table that holds authority.
+                foreach w in array array['SELECT', 'INSERT', 'UPDATE', 'DELETE'] loop
+                  if has_table_privilege(r, 'public.platform_admins', w) then
+                    leaked := leaked || (r || ' can ' || w || ' platform_admins')::text;
+                  end if;
+                end loop;
+
+                -- anon has no business reading any of it either.
+                if r = 'anon' then
+                  foreach t in array array[
+                    'plans', 'subscriptions', 'subscription_invoices',
+                    'credit_purchases', 'impersonation_sessions'
+                  ] loop
+                    if has_table_privilege(r, 'public.' || t, 'SELECT') then
+                      leaked := leaked || (r || ' can read ' || t)::text;
+                    end if;
+                  end loop;
+                end if;
+              end loop;
+
+              if exists (select 1 from pg_policies
+                         where schemaname = 'public' and tablename = 'platform_admins') then
+                leaked := leaked || 'platform_admins has a policy'::text;
+              end if;
+              if not (select relrowsecurity from pg_class
+                      where oid = 'public.platform_admins'::regclass) then
+                leaked := leaked || 'RLS is off on platform_admins'::text;
+              end if;
+
+              if array_length(leaked, 1) > 0 then
+                raise exception 'Billing state is writable: %', array_to_string(leaked, '; ');
+              end if;
+              raise notice 'billing state is read-only to every client role OK';
+            end
+            \$\$;
+          "
+
+      # The one rule this phase would be worth abandoning the rest of the phase
+      # for. A plan limit is between Selld and the seller; the buyer is a stranger
+      # who has never heard of either. Blocking their checkout because a card
+      # bounced loses the seller the sale, and a seller who cannot take money
+      # cancels rather than upgrades.
+      #
+      # Asserted functionally rather than by reading the trigger: put a store on a
+      # zero-order plan, restrict it, and try to sell something.
+      - name: A buyer can still check out of a store that has not paid us
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h 127.0.0.1 -p 54322 -U postgres -v ON_ERROR_STOP=1 -c "
+            begin;
+            do \$\$
+            declare
+              v_t uuid;
+              v_plan uuid;
+              v_addr jsonb := '{\"regionCode\":\"130000000\",\"cityCode\":\"133900000\",
+                                \"barangayCode\":\"133901001\",\"street\":\"21 Rizal\"}'::jsonb;
+              v_blocked boolean := false;
+            begin
+              insert into public.tenants (name, slug) values ('CI Billing', 'ci-billing')
+              returning id into v_t;
+
+              insert into public.plans (code, name, price_centavos, limits, is_public)
+              values ('ci-zero', 'Zero', 100,
+                      '{\"maxProducts\": 0, \"maxUsers\": 0, \"maxOrdersPerMonth\": 0,
+                        \"features\": []}'::jsonb, false)
+              returning id into v_plan;
+
+              update public.subscriptions set plan_id = v_plan, status = 'restricted'
+               where tenant_id = v_t;
+
+              -- Every channel a buyer can arrive through.
+              insert into public.orders (tenant_id, order_number, shipping_address,
+                contact_name, contact_phone, subtotal_centavos, grand_total_centavos,
+                payment_method, source)
+              values
+                (v_t, 'CI-1', v_addr, 'Ana', '+639171234567', 10000, 10000, 'cod', 'storefront'),
+                (v_t, 'CI-2', v_addr, 'Ana', '+639171234567', 10000, 10000, 'cod', 'live'),
+                (v_t, 'CI-3', v_addr, 'Ana', '+639171234567', 10000, 10000, 'cod', 'marketplace');
+
+              -- And the seller, who is the one the limit is actually about.
+              begin
+                insert into public.products (tenant_id, name, slug, status)
+                values (v_t, 'Blocked', 'ci-blocked', 'active');
+              exception when others then
+                v_blocked := true;
+              end;
+
+              if not v_blocked then
+                raise exception 'A restricted store was allowed to add a product';
+              end if;
+              if (select count(*) from public.orders where tenant_id = v_t) <> 3 then
+                raise exception 'A buyer was refused because the seller had not paid';
+              end if;
+              raise notice 'the buyer path is never gated on billing OK';
+            end
+            \$\$;
+            rollback;
+          "
+
+      # Support acting as a seller is the single most abusable capability in a
+      # multi-tenant product, and 'we log it' is worth nothing if the log is
+      # written by the same code path that could skip it. The access is derived
+      # from the row, so these two properties are what make the row worth having:
+      # the subject can read it, and nobody can edit it afterwards.
+      - name: The impersonation log is append-only and its subject can read it
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h 127.0.0.1 -p 54322 -U postgres -v ON_ERROR_STOP=1 -c "
+            do \$\$
+            declare
+              broken text[] := '{}';
+            begin
+              if not exists (
+                select 1 from pg_trigger
+                where tgrelid = 'public.impersonation_sessions'::regclass
+                  and tgname = 'impersonation_append_only'
+              ) then
+                broken := broken || 'the append-only trigger is gone'::text;
+              end if;
+
+              -- A read policy has to exist, or the accountability is to us alone.
+              if not exists (
+                select 1 from pg_policies
+                where schemaname = 'public' and tablename = 'impersonation_sessions'
+                  and cmd = 'SELECT'
+              ) then
+                broken := broken || 'a seller cannot read their own stores rows'::text;
+              end if;
+
+              -- A reason is not optional, and neither is expiry.
+              if not exists (
+                select 1 from pg_attrdef d
+                  join pg_attribute a on a.attrelid = d.adrelid and a.attnum = d.adnum
+                where d.adrelid = 'public.impersonation_sessions'::regclass
+                  and a.attname = 'expires_at'
+              ) then
+                broken := broken || 'an impersonation session no longer expires'::text;
+              end if;
+              if exists (
+                select 1 from pg_attribute
+                where attrelid = 'public.impersonation_sessions'::regclass
+                  and attname = 'reason' and not attnotnull
+              ) then
+                broken := broken || 'a reason is no longer required'::text;
+              end if;
+
+              if array_length(broken, 1) > 0 then
+                raise exception 'The impersonation audit trail is weakened: %',
+                  array_to_string(broken, '; ');
+              end if;
+              raise notice 'the impersonation log is append-only and readable by its subject OK';
             end
             \$\$;
           "

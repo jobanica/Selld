@@ -4894,6 +4894,289 @@ set local role authenticated;
 select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
 
 -- ---------------------------------------------------------------------------
+-- Phase 19 — billing, super admin & white-label
+-- ---------------------------------------------------------------------------
+\echo ''
+\echo '=== Phase 19: billing and the two cross-tenant roles'
+
+-- Selld staff and a white-label partner are the first two roles in this schema
+-- that are *not* scoped to a tenant, which makes them the widest boundaries
+-- here. Everything below asks the same question in both directions: can an
+-- ordinary seller reach any of it, and can a reseller reach past its own stores.
+reset role;
+do $$
+declare i record; v_res uuid; v_plan uuid;
+begin
+  select * into i from tests.ids;
+
+  -- A user of her own. Jess is already a packer inside Rhea's store further up
+  -- this file, so using her here would make "a reseller cannot read a store she
+  -- does not own" pass or fail for the wrong reason — she owns it as a member.
+  insert into auth.users (id, email, raw_user_meta_data) values
+    ('55555555-5555-5555-5555-555555555555', 'partner@example.ph',
+     '{"full_name":"Bea Villanueva"}'::jsonb);
+
+  insert into public.resellers (name, slug, commission_bps)
+  values ('Bulaklak Partners', 'bulaklak', 2500) returning id into v_res;
+  insert into public.reseller_members (reseller_id, user_id, role)
+  values (v_res, '55555555-5555-5555-5555-555555555555', 'owner');
+  insert into public.plans (reseller_id, code, name, price_centavos, limits)
+  values (v_res, 'basic', 'Bulaklak Basic', 89900,
+          '{"maxProducts": 300, "maxUsers": 5, "features": ["live"]}'::jsonb)
+  returning id into v_plan;
+
+  insert into public.platform_admins (user_id, role) values (i.nica, 'owner');
+
+  create table tests.p19 as select v_res as reseller_id, v_plan as plan_id;
+  grant select on tests.p19 to authenticated, anon;
+end;
+$$;
+
+set local role authenticated;
+select tests.login('22222222-2222-2222-2222-222222222222', 'marlon@example.ph');
+
+-- ---- A seller cannot read another store's money -----------------------------
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+
+  perform tests.eq(
+    (select count(*)::int from public.subscriptions where tenant_id = i.rhea_tenant), 0,
+    'Marlon cannot see what Rhea pays');
+  perform tests.eq(
+    (select count(*)::int from public.subscription_invoices where tenant_id = i.rhea_tenant), 0,
+    'nor her invoices');
+  perform tests.eq(
+    (select count(*)::int from public.credit_purchases where tenant_id = i.rhea_tenant), 0,
+    'nor her credit purchases');
+  perform tests.eq(
+    (select count(*)::int from public.impersonation_sessions where tenant_id = i.rhea_tenant), 0,
+    'nor who has been inside her store');
+
+  perform tests.rejects(format($q$ select public.subscription_overview(%L) $q$, i.rhea_tenant),
+    'nor ask for her billing screen');
+  perform tests.rejects(format($q$ select public.reseller_branding(%L) $q$, i.rhea_tenant),
+    'nor who bills her');
+  perform tests.rejects(format($q$ select public.announcements_active(%L) $q$, i.rhea_tenant),
+    'nor what she has been told');
+end;
+$$;
+
+-- ---- A seller cannot give themselves anything -------------------------------
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+
+  -- There is no UPDATE grant on `subscriptions` at all. A seller who could write
+  -- this row could set their own status to `active` and never pay again, which is
+  -- why the whole table is read-only to every client role.
+  perform tests.rejects(
+    format($q$ update public.subscriptions set status = 'active' where tenant_id = %L $q$,
+      i.marlon_tenant),
+    'a seller cannot mark their own subscription active');
+  perform tests.rejects(
+    format($q$ update public.subscriptions set price_centavos = 0 where tenant_id = %L $q$,
+      i.marlon_tenant),
+    'nor set their own price to zero');
+  perform tests.rejects(
+    format($q$ insert into public.subscription_invoices
+      (tenant_id, subscription_id, amount_centavos, period_start, period_end)
+      select %L, id, 0, now(), now() from public.subscriptions where tenant_id = %L $q$,
+      i.marlon_tenant, i.marlon_tenant),
+    'nor write themselves a paid invoice');
+  perform tests.rejects(
+    format($q$ insert into public.credit_purchases (tenant_id, credits, amount_centavos, status)
+      values (%L, 10000, 0, 'paid') $q$, i.marlon_tenant),
+    'nor grant themselves ten thousand SMS credits');
+  perform tests.rejects($q$ update public.plans set price_centavos = 0 $q$,
+    'nor re-price the plans');
+end;
+$$;
+
+-- ---- `platform_admins` is authority, so nobody can reach it -----------------
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+
+  -- RLS on, no policy at all, and no grant. The table that can grant membership
+  -- of itself is the shortest privilege-escalation path in any product.
+  perform tests.rejects($q$ select count(*) from public.platform_admins $q$,
+    'no client role can even read the list of Selld staff');
+  perform tests.rejects(
+    format($q$ insert into public.platform_admins (user_id) values (%L) $q$, i.marlon),
+    'and certainly cannot join it');
+
+  perform tests.rejects($q$ select public.platform_overview() $q$,
+    'a seller cannot read the platform''s own numbers');
+  perform tests.rejects($q$ select public.platform_tenants() $q$,
+    'nor list every store on it');
+  perform tests.rejects($q$ select public.platform_impersonation_log() $q$,
+    'nor the platform-wide support access log');
+  perform tests.rejects(
+    format($q$ select public.platform_set_plan(%L, (select id from public.plans limit 1),
+      'active', 'giving myself the top plan') $q$, i.marlon_tenant),
+    'nor put themselves on whatever plan they like');
+  perform tests.rejects(
+    $q$ select public.platform_announce('Hi', 'Everyone', 'info') $q$,
+    'nor address every seller on Selld');
+  perform tests.rejects(
+    $q$ select public.platform_create_reseller('Mine', 'mine', 'x@example.ph') $q$,
+    'nor make themselves a white-label partner');
+  perform tests.rejects($q$ select public.reseller_overview() $q$,
+    'nor read a partner console they have no part in');
+end;
+$$;
+
+-- ---- A reseller sees its own stores, and no others --------------------------
+select tests.login('55555555-5555-5555-5555-555555555555', 'partner@example.ph');
+do $$
+declare i record; p record;
+begin
+  select * into i from tests.ids;
+  select * into p from tests.p19;
+
+  perform tests.eq(public.current_reseller(), p.reseller_id,
+    'Bea acts for her own partner account');
+  perform tests.ok(not public.is_platform_admin(),
+    'and a reseller is emphatically not Selld staff');
+  perform tests.ok(not public.is_reseller_of(i.rhea_tenant),
+    'Rhea''s store is not hers — it belongs to no reseller');
+  perform tests.ok(not public.is_tenant_member(i.rhea_tenant),
+    'and she is not a member of it either, so the next assertions mean what they say');
+
+  perform tests.rejects($q$ select public.platform_overview() $q$,
+    'so she cannot read the platform''s numbers');
+  perform tests.rejects(format($q$ select public.subscription_overview(%L) $q$, i.rhea_tenant),
+    'nor a store she does not own');
+  perform tests.rejects(format($q$ select public.reseller_set_price(%L, 100) $q$, i.rhea_tenant),
+    'nor re-price one');
+  perform tests.rejects(
+    format($q$ select public.reseller_create_tenant('X', 'p19-x', 'x@example.ph', %L, 100) $q$,
+      (select id from public.plans where code = 'growth' and reseller_id is null)),
+    'nor sell a plan that is not hers');
+  perform tests.eq(
+    (select count(*)::int from public.subscriptions where tenant_id = i.rhea_tenant), 0,
+    'and the row itself stays invisible');
+end;
+$$;
+
+-- ---- A seller reads the record of who entered their store -------------------
+reset role;
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+  perform public.impersonate_begin(i.nica, i.rhea_tenant, 'Investigating ticket 4182');
+end;
+$$;
+
+set local role authenticated;
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+do $$
+declare i record; v_id uuid;
+begin
+  select * into i from tests.ids;
+
+  -- The accountability is to the seller. A log only Selld can read would be for
+  -- our comfort rather than their protection.
+  perform tests.eq(
+    (select count(*)::int from public.impersonation_sessions where tenant_id = i.rhea_tenant), 1,
+    'Rhea can read the record of Selld entering her store');
+  select id into v_id from public.impersonation_sessions where tenant_id = i.rhea_tenant;
+
+  -- Append-only for everybody, including her: an audit trail either party can
+  -- rewrite is worth nothing to either party.
+  perform tests.rejects(
+    format($q$ update public.impersonation_sessions set reason = 'nothing' where id = %L $q$, v_id),
+    'and cannot rewrite it herself');
+  perform tests.rejects(
+    format($q$ delete from public.impersonation_sessions where id = %L $q$, v_id),
+    'nor delete it');
+  perform tests.rejects(
+    format($q$ select public.impersonate_begin(%L, %L, 'because I want to') $q$,
+      i.rhea, i.marlon_tenant),
+    'and cannot start one of her own into somebody else''s store');
+end;
+$$;
+
+-- ---- A buyer, least of all --------------------------------------------------
+select tests.logout();
+set local role anon;
+do $$
+declare i record;
+begin
+  select * into i from tests.ids;
+
+  perform tests.rejects($q$ select count(*) from public.subscriptions $q$,
+    'anon has no grant on subscriptions');
+  perform tests.rejects($q$ select count(*) from public.subscription_invoices $q$,
+    'nor on invoices');
+  perform tests.rejects($q$ select count(*) from public.plans $q$,
+    'nor even on the plan catalogue');
+  perform tests.rejects($q$ select count(*) from public.impersonation_sessions $q$,
+    'nor on the support access log');
+  perform tests.rejects(format($q$ select public.subscription_overview(%L) $q$, i.rhea_tenant),
+    'and no way to ask what a store pays');
+  perform tests.rejects($q$ select public.billing_dunning_run() $q$,
+    'nor to run the dunning ladder');
+  perform tests.rejects($q$ select public.billing_due_claim() $q$,
+    'nor to raise an invoice');
+  perform tests.rejects(
+    $q$ select public.billing_invoice_settle('anything', 'paid') $q$,
+    'nor to mark one paid — which would be a free subscription for the asking');
+  perform tests.rejects(
+    $q$ select public.credit_purchase_settle('anything', 'paid') $q$,
+    'nor to hand a store ten thousand SMS credits');
+  perform tests.rejects(
+    format($q$ select public.impersonate_begin(%L, %L, 'no reason at all') $q$,
+      i.rhea, i.rhea_tenant),
+    'nor to grant itself a support session');
+end;
+$$;
+
+-- ---- The buyer's checkout is never the seller's problem ---------------------
+reset role;
+do $$
+declare i record; v_addr jsonb;
+begin
+  select * into i from tests.ids;
+  v_addr := '{"regionCode":"130000000","cityCode":"133900000",
+              "barangayCode":"133901001","street":"21 Rizal"}'::jsonb;
+
+  -- The single most important assertion in this phase. Restrict the store, put
+  -- it over its order ceiling, and a buyer still gets to buy: punishing a
+  -- stranger for somebody else's overdue invoice costs the seller the sale, and
+  -- a seller who cannot take money cancels rather than upgrades.
+  update public.subscriptions
+     set status = 'restricted',
+         plan_id = (select id from public.plans where code = 'free' and reseller_id is null)
+   where tenant_id = i.rhea_tenant;
+
+  insert into public.orders (tenant_id, order_number, shipping_address, contact_name,
+    contact_phone, subtotal_centavos, grand_total_centavos, payment_method, source)
+  values (i.rhea_tenant, 'P19-BUYER-1', v_addr, 'Ana', '+639171234567',
+          10000, 10000, 'cod', 'storefront');
+  perform tests.eq(
+    (select count(*)::int from public.orders
+     where tenant_id = i.rhea_tenant and order_number = 'P19-BUYER-1'), 1,
+    'a restricted store still takes a storefront order');
+
+  perform tests.rejects(
+    format($q$ insert into public.products (tenant_id, name, slug, status)
+      values (%L, 'Blocked', 'p19-blocked', 'active') $q$, i.rhea_tenant),
+    'while the seller cannot add a product');
+
+  update public.subscriptions set status = 'active' where tenant_id = i.rhea_tenant;
+end;
+$$;
+
+set local role authenticated;
+select tests.login('11111111-1111-1111-1111-111111111111', 'rhea@example.ph');
+
+-- ---------------------------------------------------------------------------
 -- my_tenants()
 -- ---------------------------------------------------------------------------
 \echo ''
@@ -4930,8 +5213,8 @@ declare v_passed int := coalesce(nullif(current_setting('tests.passed', true), '
 begin
   raise notice '';
   raise notice '=== % assertions passed', v_passed;
-  if v_passed < 650 then
-    raise exception 'Expected at least 650 assertions, only % ran — did a section get skipped?', v_passed
+  if v_passed < 700 then
+    raise exception 'Expected at least 700 assertions, only % ran — did a section get skipped?', v_passed
       using errcode = 'triggered_action_exception';
   end if;
 end;

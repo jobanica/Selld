@@ -23,8 +23,20 @@ import { fetchSettings } from '@/lib/settings'
  * This is convenience, not security. Every query behind it is independently
  * protected by RLS, so bypassing this component in the client yields dashboard
  * chrome that returns zero rows.
+ *
+ * `requireTenant={false}` stops after step 2. Phase 19 added two surfaces whose
+ * users are legitimately storeless — Selld's own staff and a white-label partner,
+ * who sells stores rather than owning one — and sending a partner to "create your
+ * store" before they can onboard a seller is a step in the middle of the exact
+ * flow this phase exists to have no steps in the middle of.
  */
-export function RequireAuth({ children }: { children: React.ReactNode }) {
+export function RequireAuth({
+  children,
+  requireTenant = true,
+}: {
+  children: React.ReactNode
+  requireTenant?: boolean
+}) {
   const { t } = useTranslation()
   const { status } = useSession()
   const { tenants, activeTenant, isLoading: tenantsLoading, error } = useTenant()
@@ -32,7 +44,7 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
   const settings = useQuery({
     queryKey: ['tenant-settings', activeTenant?.id],
     queryFn: () => fetchSettings(activeTenant?.id ?? ''),
-    enabled: activeTenant !== null,
+    enabled: requireTenant && activeTenant !== null,
   })
 
   if (status === 'loading') return <Splash label={t('common.loading')} />
@@ -48,6 +60,8 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
   }
 
   if (status === 'anonymous') return <SignInPage />
+
+  if (!requireTenant) return <>{children}</>
 
   if (tenantsLoading) return <Splash label={t('common.loading')} />
 

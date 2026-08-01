@@ -13,6 +13,7 @@ import {
   Store,
   Truck,
   Users,
+  Wallet,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -68,6 +69,7 @@ export const NAV_SECTIONS: NavSection[] = [
       { to: '/broadcasts', labelKey: 'broadcasts', icon: Megaphone, phase: 16 },
       { to: '/marketplaces', labelKey: 'marketplaces', icon: Store, phase: 17 },
       { to: '/analytics', labelKey: 'analytics', icon: BarChart3, phase: 18 },
+      { to: '/billing', labelKey: 'billing', icon: Wallet, phase: 19 },
       { to: '/settings', labelKey: 'settings', icon: Settings, phase: 2 },
     ],
   },
