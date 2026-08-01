@@ -1,4 +1,5 @@
 import { Route, Routes } from 'react-router-dom'
+import { StoresPage } from '@/features/tenancy/stores-page'
 
 import { DashboardLayout } from '@/app/dashboard-layout'
 import { ALL_NAV_ITEMS } from '@/app/navigation'
@@ -78,6 +79,7 @@ export default function DashboardApp() {
             }
           >
             <Route index element={<DashboardHome />} />
+            <Route path="/stores" element={<StoresPage />} />
             <Route path="/products" element={<ProductListPage />} />
             <Route path="/inventory" element={<InventoryPage />} />
             <Route path="/shipping" element={<ShippingPage />} />

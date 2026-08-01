@@ -50,6 +50,7 @@ export const NAV_SECTIONS: NavSection[] = [
     titleKey: 'sectionMain',
     items: [
       { to: '/', labelKey: 'dashboard', icon: LayoutDashboard, phase: 0 },
+      { to: '/stores', labelKey: 'stores', icon: Store, phase: 1 },
       { to: '/orders', labelKey: 'orders', icon: ShoppingBag, phase: 9 },
       { to: '/packing', labelKey: 'packing', icon: PackageCheck, phase: 20 },
     ],
