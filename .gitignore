@@ -30,3 +30,8 @@ supabase/.branches
 vite.config.ts.timestamp-*
 vitest.config.ts.timestamp-*
 .lighthouse
+
+# Vercel CLI link state (project + org ids). `vercel link` also appends a bare
+# `.env*` here — dropped, because it lands after the `!.env.example` negation
+# above and re-ignores the one env file this repo does track.
+.vercel
