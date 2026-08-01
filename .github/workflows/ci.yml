@@ -1,9 +1,16 @@
 name: CI
 
+# This workflow was registered and active for twenty phases and ran zero times.
+# Not because Actions was off — because nothing ever matched a trigger. There is
+# no `main` branch yet, and no pull request has been opened, so `push` and
+# `pull_request` both had nothing to fire on. A workflow that cannot run is
+# indistinguishable from a workflow that passes, and this one is the only thing
+# standing between a schema change and a cross-tenant leak.
 on:
   push:
-    branches: [main]
+    branches: [main, 'claude/**']
   pull_request:
+  workflow_dispatch:
 
 # Cancel superseded runs on the same ref — no value in finishing a stale commit.
 concurrency:
@@ -115,7 +122,27 @@ jobs:
           for _ in $(seq 1 30); do
             if psql -h 127.0.0.1 -p 54322 -U postgres -qtAc \
                  "select 1 from pg_available_extensions where name = 'pg_trgm'" | grep -q 1; then
-              echo "Postgres ready."
+              echo "Extensions installed."
+              break
+            fi
+            sleep 1
+          done
+
+          # And pg_graphql is still moving after that. The image installs a schema
+          # -version event trigger that fires on every DDL these migrations run,
+          # and while the extension is being wired its sequence OID changes under
+          # it — so applying migrations too early dies with "could not open
+          # relation with OID" from a function no migration mentions. Wait for the
+          # OID to stop moving rather than for a fixed sleep.
+          prev=""; stable=0
+          for _ in $(seq 1 60); do
+            oid=$(psql -h 127.0.0.1 -p 54322 -U postgres -qtAc \
+              "select coalesce((select oid from pg_class
+                                 where oid = 'graphql.seq_schema_version'::regclass), 0)" 2>/dev/null || echo "")
+            if [ -n "$oid" ] && [ "$oid" = "$prev" ]; then stable=$((stable + 1)); else stable=0; fi
+            prev="$oid"
+            if [ "$stable" -ge 5 ]; then
+              echo "Postgres ready (pg_graphql settled at oid $prev)."
               exit 0
             fi
             sleep 1
