@@ -293,6 +293,31 @@ export function CheckoutPage({
               defaultValue={contact.notes}
               placeholder={t('checkout.notesPlaceholder')}
             />
+
+            {/*
+              Marketing consent, and *only* marketing consent.
+              Ticking it is not a condition of buying: processing this order is
+              necessary for the contract the buyer is entering into, so asking for
+              consent to it would imply it could be withheld, which it cannot be if
+              they want their parcel. What genuinely needs asking is the payday
+              broadcast three weeks from now.
+              Pre-ticked would be worthless as evidence, so it is not.
+            */}
+            <label className="flex min-h-11 items-start gap-3 rounded-lg border p-3 text-sm has-[:checked]:border-primary has-[:checked]:bg-primary/5">
+              <input
+                type="checkbox"
+                name="marketingConsent"
+                value="yes"
+                className="mt-0.5 size-4 shrink-0"
+              />
+              <span className="text-muted-foreground">{t('checkout.marketingConsent')}</span>
+            </label>
+            <p className="text-xs text-muted-foreground">
+              {t('checkout.privacyNote')}{' '}
+              <a href="/privacy" className="underline underline-offset-2">
+                {t('checkout.privacyLink')}
+              </a>
+            </p>
           </section>
 
           {/* Desktop submit; phones use the sticky bar. */}

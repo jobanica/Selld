@@ -1,4 +1,5 @@
 import { normalizePhPhone, parsePhPhone } from '@/lib/phone/ph-phone'
+import { clearSnapshots } from '@/lib/offline/offline-cache'
 import { getSupabase } from '@/lib/supabase/client'
 
 /**
@@ -133,7 +134,16 @@ export async function verifyOtp(input: {
   if (error) throw error
 }
 
+/**
+ * Sign out, and take the offline cache with it.
+ *
+ * Cleared *before* the network call rather than after: a packer handing the phone
+ * back is the whole scenario, and if `signOut()` throws on a dead connection the
+ * one thing that must still have happened is that the customer list is gone from
+ * this device. The session token is cleared locally by supabase-js regardless.
+ */
 export async function signOut(): Promise<void> {
+  clearSnapshots()
   const { error } = await getSupabase().auth.signOut()
   if (error) throw error
 }

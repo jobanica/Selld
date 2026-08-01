@@ -8,6 +8,7 @@ import {
   toXenditAmount,
 } from '@/core/payments/xendit-provider'
 
+import { guard } from './rate-limit'
 import { readServiceConfig } from './payment-webhook'
 import { rpc, type SupabaseConfig } from './supabase-rpc'
 
@@ -364,6 +365,8 @@ export async function serveBillingWebhook(
     send(response, 405, { error: 'method_not_allowed' })
     return true
   }
+
+  if (await guard(request, response, 'webhook', 'billing')) return true
 
   const config = readPlatformBillingConfig(env)
   const service = readServiceConfig(env)

@@ -8,6 +8,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Input } from '@/components/ui/input'
 import { useActiveTenant } from '@/features/tenancy/use-tenant'
 import { formatPHP, fromDb } from '@/lib/money'
+import { mayMarket, setMarketingConsent } from '@/features/privacy/privacy-api'
 import { formatManilaDate } from '@/lib/time/manila'
 
 import {
@@ -64,6 +65,23 @@ export function CustomerPanel({ customerId, onClose }: { customerId: string; onC
     onError: (cause) => setError(describeCustomerError(cause)),
   })
 
+  const consent = useQuery({
+    queryKey: ['customer-consent', tenant.id, customerId],
+    queryFn: () => mayMarket(tenant.id, customerId),
+  })
+
+  const setConsent = useMutation({
+    mutationFn: (granted: boolean) =>
+      setMarketingConsent({ tenantId: tenant.id, customerId, granted }),
+    onSuccess: async () => {
+      setError(null)
+      await queryClient.invalidateQueries({
+        queryKey: ['customer-consent', tenant.id, customerId],
+      })
+    },
+    onError: (cause) => setError(describeCustomerError(cause)),
+  })
+
   const data = profile.data
 
   return (
@@ -108,6 +126,32 @@ export function CustomerPanel({ customerId, onClose }: { customerId: string; onC
           </CardContent>
         </Card>
       </div>
+
+      {/*
+        The opt-out lives here rather than on the privacy screen, because this is
+        where the seller is standing when the customer tells them. Somebody who
+        replies STOP to a broadcast gets mentioned in a Messenger thread, and the
+        seller opens the customer — not a compliance page.
+      */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">{t('privacy.marketingTitle')}</CardTitle>
+          <CardDescription>
+            {consent.data === false ? t('privacy.marketingOff') : t('privacy.marketingOn')}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Button
+            type="button"
+            variant="outline"
+            className="h-11"
+            disabled={setConsent.isPending || consent.isLoading}
+            onClick={() => setConsent.mutate(consent.data === false)}
+          >
+            {consent.data === false ? t('privacy.marketingResume') : t('privacy.marketingStop')}
+          </Button>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader className="pb-3">

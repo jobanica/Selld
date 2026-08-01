@@ -335,7 +335,11 @@ jobs:
                 'platform_impersonation_log', 'platform_announce', 'platform_create_reseller',
                 'reseller_plan_upsert', 'reseller_create_tenant', 'reseller_set_price',
                 'reseller_overview', 'reseller_revenue_split', 'reseller_set_branding',
-                'reseller_branding', 'announcements_active', 'my_platform_roles'
+                'reseller_branding', 'announcements_active', 'my_platform_roles',
+                'rate_limit_hit', 'rate_limit_sweep', 'record_checkout_consent',
+                'customer_may_market', 'set_marketing_consent',
+                'dsr_open', 'dsr_close', 'dsr_list', 'dsr_export', 'dsr_serve_deletion',
+                'breach_record', 'breach_update', 'breach_list'
               ]
               loop
                 if exists (
@@ -403,7 +407,8 @@ jobs:
                 'marketplace_connections_due', 'marketplace_sellable',
                 'billing_due_claim', 'billing_invoice_attach', 'billing_invoice_settle',
                 'billing_invoice_note_failure', 'billing_dunning_run',
-                'credit_purchase_attach', 'credit_purchase_settle', 'impersonate_begin'
+                'credit_purchase_attach', 'credit_purchase_settle', 'impersonate_begin',
+                'rate_limit_hit', 'rate_limit_sweep', 'record_checkout_consent'
               ]
               loop
                 if exists (
@@ -1274,6 +1279,87 @@ jobs:
               raise notice 'the impersonation log is append-only and readable by its subject OK';
             end
             \$\$;
+          "
+
+      # Phase 20's own suite. It checks the tables nobody wrote an assertion for
+      # — a table added six phases from now fails it by existing, which is the
+      # only way a coverage check stays true.
+      - name: RLS coverage, per table
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h 127.0.0.1 -p 54322 -U postgres -v ON_ERROR_STOP=1 \
+            -f supabase/tests/rls-coverage.sql
+
+      # A deletion request has to leave the seller's books intact. Deleting the
+      # orders is the easy implementation and it would leave them unable to
+      # answer BIR, unable to reconcile a courier statement, and with a revenue
+      # figure that changed retroactively.
+      - name: Erasure removes the person and keeps the transaction
+        env:
+          PGPASSWORD: postgres
+        run: |
+          psql -h 127.0.0.1 -p 54322 -U postgres -v ON_ERROR_STOP=1 -c "
+            begin;
+            do \$\$
+            declare
+              v_t uuid; v_c uuid; v_o uuid; v_req uuid; v_user uuid;
+              v_addr jsonb := '{\"regionCode\":\"130000000\",\"cityCode\":\"133900000\",
+                                \"barangayCode\":\"133901001\",\"street\":\"21 Rizal\"}'::jsonb;
+              v_total bigint; v_items int;
+            begin
+              insert into auth.users (id, email)
+              values (gen_random_uuid(), 'ci-privacy@example.ph') returning id into v_user;
+              insert into public.tenants (name, slug) values ('CI Privacy', 'ci-privacy')
+              returning id into v_t;
+              insert into public.tenant_members (tenant_id, user_id, role, accepted_at)
+              values (v_t, v_user, 'owner', now());
+              perform set_config('request.jwt.claims',
+                json_build_object('sub', v_user, 'role', 'authenticated')::text, true);
+
+              insert into public.customers (tenant_id, name, phone, email, source)
+              values (v_t, 'Marites', '+639171230180', 'm@example.ph', 'storefront')
+              returning id into v_c;
+              insert into public.orders (tenant_id, order_number, customer_id, shipping_address,
+                contact_name, contact_phone, subtotal_centavos, grand_total_centavos,
+                payment_method, source)
+              values (v_t, 'CI-1', v_c, v_addr, 'Marites', '+639171230180', 50000, 50000,
+                      'cod', 'storefront')
+              returning id into v_o;
+              insert into public.order_items (tenant_id, order_id, product_name, sku, qty,
+                unit_price_centavos, line_total_centavos)
+              values (v_t, v_o, 'Serum', 'CI-S', 1, 50000, 50000);
+
+              v_req := public.dsr_open(v_t, 'deletion', '+639171230180');
+              perform public.dsr_serve_deletion(v_req);
+
+              select grand_total_centavos into v_total from public.orders where id = v_o;
+              select count(*) into v_items from public.order_items where order_id = v_o;
+
+              if (select contact_phone from public.orders where id = v_o) = '+639171230180' then
+                raise exception 'The phone survived an erasure';
+              end if;
+              if (select contact_name from public.orders where id = v_o) <> 'Erased' then
+                raise exception 'The name survived an erasure';
+              end if;
+              if (select shipping_address ->> 'street' from public.orders where id = v_o)
+                 is not null then
+                raise exception 'The street survived an erasure';
+              end if;
+              if v_total <> 50000 then
+                raise exception 'Erasure changed the revenue: %', v_total;
+              end if;
+              if v_items <> 1 then
+                raise exception 'Erasure destroyed the line items the seller has to keep';
+              end if;
+              if (select shipping_address ->> 'cityCode' from public.orders where id = v_o)
+                 is null then
+                raise exception 'Erasure removed the city, which is a shipping zone, not a person';
+              end if;
+              raise notice 'erasure removes the person and keeps the books OK';
+            end
+            \$\$;
+            rollback;
           "
 
       # Guard against the checked-in types drifting from the migrations. If this

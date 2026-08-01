@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 
 import type {
@@ -20,7 +21,9 @@ import {
   readRememberedCheckout,
 } from './cookies'
 import { notifyOrderPlaced } from './order-notifications'
+import { readServiceConfig } from './payment-webhook'
 import { startOnlinePayment } from './payment-start'
+import { clientIp } from './rate-limit'
 import { rpc, RpcError, type SupabaseConfig } from './supabase-rpc'
 
 /**
@@ -340,6 +343,12 @@ export async function handleCheckoutPost(
    * buyer still lands on their confirmation page with an unpaid order they can
    * retry, rather than losing the order to a bad minute at Xendit.
    */
+  // Recorded whichever way the box was left, and *after* the order exists —
+  // there is no customer row to attach it to before then. Safe to order that way
+  // round precisely because the order does not depend on it: see the phase-20
+  // migration header.
+  await recordConsent(request, token, receipt.id, body.get('marketingConsent') === 'yes')
+
   if (paymentMethod !== 'cod') {
     const started = await startOnlinePayment({
       supabase,
@@ -375,6 +384,63 @@ export async function handleCheckoutPost(
   )
   redirect(response, '/order/confirmed', cookies)
   return { kind: 'redirect' }
+}
+
+/**
+ * Write the marketing grant, with the evidence a regulator would ask for.
+ *
+ * The IP is *hashed*, not stored. An IP address is personal data under the DPA,
+ * and a consent log that is itself a privacy problem is a poor joke — the hash is
+ * enough to show two grants came from the same place, which is all the evidence
+ * needs to do.
+ *
+ * Never allowed to fail the checkout. The order is already placed and the buyer's
+ * stock is already reserved; throwing here would turn a successful purchase into
+ * a 500 over a checkbox.
+ */
+async function recordConsent(
+  request: IncomingMessage,
+  token: string,
+  orderId: string,
+  granted: boolean,
+): Promise<void> {
+  const service = readServiceConfig()
+  if (service === null) return
+
+  const ip = clientIp(request)
+  try {
+    await rpc(service, 'record_checkout_consent', {
+      p_token: token,
+      p_order_id: orderId,
+      p_granted: granted,
+      p_policy_version: await policyVersion(service),
+      p_evidence: {
+        surface: 'storefront',
+        ipHash: createHash('sha256').update(ip).digest('hex').slice(0, 32),
+        userAgent: String(request.headers['user-agent'] ?? '').slice(0, 200),
+      },
+    })
+  } catch {
+    /* A checkbox must never cost a buyer their order. */
+  }
+}
+
+/**
+ * The version of the policy the buyer was shown.
+ *
+ * Asked of the database rather than hard-coded here, because a grant recorded
+ * against a version string this file happens to hold is a grant to a document
+ * nobody can prove was on the page.
+ */
+let cachedPolicyVersion: string | null = null
+async function policyVersion(service: SupabaseConfig): Promise<string> {
+  if (cachedPolicyVersion !== null) return cachedPolicyVersion
+  try {
+    cachedPolicyVersion = await rpc<string>(service, 'privacy_policy_version', {})
+  } catch {
+    cachedPolicyVersion = 'unknown'
+  }
+  return cachedPolicyVersion
 }
 
 /** Map a Postgres error onto the field the buyer needs to fix. */

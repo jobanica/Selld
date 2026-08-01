@@ -5,7 +5,7 @@
 Multi-tenant ecommerce + order operations platform for Philippine social sellers.
 Working name: **Selld** (`selld.ph` / `selld.store`).
 
-> **Status: phase 19 (Billing, super admin & white-label) complete.** Next: phase 20, hardening & launch.
+> **Status: phase 20 (Hardening & launch) complete — the 21-phase build spec is finished.**
 > See [`docs/phase-status.md`](docs/phase-status.md).
 
 ---
@@ -177,6 +177,25 @@ and cannot be taken without leaving one. Sessions expire in an hour, the table i
 append-only for everybody including the actor, and the store's own members can
 select their rows. A log only we could read would be for our comfort rather than
 their protection.
+
+**Consent is for marketing, not for the order.** Processing a purchase is
+necessary for the contract the buyer is entering into, so the checkout checkbox
+asks about the payday broadcast three weeks later and nothing else — and the
+order goes through whichever way it is left. A withdrawal is enforced where it
+matters, by a trigger on the recipient row, so it holds for broadcasts, the
+abandoned-cart sequence and anything added later.
+
+**"Delete my data" and "keep your sales records" are both the law**, so a
+deletion request is served by *erasure*: the name, phone, email, street address
+and every message go; the order, its total, its date, its line items and its
+destination city stay. A CI step erases a real order and checks the revenue did
+not move.
+
+**Rate limiting fails open.** Counters live in Postgres so the limit survives a
+deploy and spans processes, and any error — including the database being
+unreachable — is treated as allow. Abuse is recoverable; a storefront returning
+429 to real buyers during an incident is a seller losing a day's sales because of
+our infrastructure.
 
 ## Documentation
 

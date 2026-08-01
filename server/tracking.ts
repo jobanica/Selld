@@ -6,6 +6,7 @@ import type { CourierProvider, TrackingEvent } from '@/core/couriers/types'
 import { smsRegistry } from '@/core/sms'
 
 import { registerSmsProviders } from './order-notifications'
+import { guard } from './rate-limit'
 import { readServiceConfig } from './payment-webhook'
 import { rpc, type SupabaseConfig } from './supabase-rpc'
 
@@ -222,6 +223,11 @@ export async function serveCourierWebhook(
   const rest = pathname.slice(COURIER_WEBHOOK_PREFIX.length).split('/')
   const courier = rest[0] ?? ''
   const secret = rest[1] ?? ''
+
+  // Per courier, not per address: a courier pushing 300 scans after an outage is
+  // legitimate and arrives from one host, so the number has to fit that burst.
+  if (await guard(request, response, 'webhook', courier)) return true
+
   const expected = process.env['COURIER_WEBHOOK_SECRET'] ?? ''
 
   const service = readServiceConfig()

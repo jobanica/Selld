@@ -5,7 +5,7 @@ Build one phase per session, in order. The full roadmap is in
 [`docs/build-spec.md`](docs/build-spec.md); who we're building for is in
 [`docs/avatar.md`](docs/avatar.md).
 
-**Current state: phase 19 complete.** Next up is phase 20 (hardening & launch).
+**Current state: phase 20 complete — the build spec is finished.**
 
 ---
 
@@ -21,6 +21,8 @@ pnpm start            # production storefront server (needs `pnpm build` first)
                       # webhooks need COURIER_WEBHOOK_SECRET and LIVE_WEBHOOK_SECRET
 pnpm seed:demo        # demo store + generated product images, for storefront work
 pnpm lighthouse       # Lighthouse mobile against a running `pnpm start`
+pnpm load:test        # checkout + live ingest at 100 req/s against a running server
+pnpm pwa:icons        # regenerate public/icon-*.png from scripts/pwa-icons.ts
 
 pnpm db:start         # Supabase local stack (needs Docker)
 pnpm db:reset         # reset + re-run migrations, then reseed PSGC
@@ -296,6 +298,28 @@ What follows from that:
   seller adding products and staff while the **storefront keeps working**, and
   nothing is ever deleted by billing.
 
+- **Phase 20 adds no new boundary and one new *obligation*: the Data Privacy
+  Act.** Consent is for **marketing**, not for the order — processing a purchase
+  is necessary for the contract, so asking consent for it implies it could be
+  withheld, which it cannot be if the buyer wants their parcel. The checkbox
+  records a marketing grant with the policy version and the order does not depend
+  on it, which is also phase 19's rule intact. The *send* path is where it bites:
+  `broadcast_recipients` refuses a withdrawn customer through a trigger, so it
+  holds for the abandoned-cart sequence and the repeat-buyer nudge too.
+- **A deletion request is served by erasure, not by DELETE.** "Delete my data"
+  and "keep your sales records" are both legal obligations. `dsr_serve_deletion`
+  removes the name, phone, email, PSID, notes, street and every message, and
+  keeps the order, its total, its date, its line items and its destination
+  *city*. Deleting the rows is the easy version and it leaves the seller unable
+  to answer BIR, unable to reconcile a courier statement, and with a revenue
+  figure that changed retroactively.
+- **Rate limiting fails open, deliberately.** `server/rate-limit.ts` treats any
+  error — no service role, database down, timeout — as allow. Abuse is
+  recoverable; a storefront returning 429 to real customers during an incident is
+  the seller losing a day's sales because of our infrastructure. And the counters
+  live in Postgres because a per-process counter that resets on deploy is not a
+  limit, it is a comment.
+
 **`cart_pricing()` is the only place money is computed.** The quote the buyer sees
 and the order that gets written both go through it, so they cannot disagree.
 `cart_items.unit_price_centavos` is a display snapshot and is never charged —
@@ -314,7 +338,8 @@ src/
   storefront/   ← public buyer surface, own perf budget
   features/     ← feature slices; may import from core and lib
     address/ analytics/ auth/ billing/ broadcasts/ catalog/ cod/ customers/
-    inbox/ inventory/ live/ marketplaces/ onboarding/ orders/ platform/ tenancy/
+    inbox/ inventory/ live/ marketplaces/ onboarding/ orders/ platform/
+    privacy/ tenancy/
   lib/          ← money, phone, psgc, i18n, time, supabase, tenant
   components/ui ← shadcn/ui primitives
 ```
@@ -751,6 +776,34 @@ one new file plus one registry line, and zero lines of order logic.
   white-label partner legitimately owns none — they sell stores — so the partner
   console needs `requireTenant={false}` and its own shell. Worth checking for any
   future surface whose user is not a seller.
+- **A rate limit below the throughput of the feature it protects is the feature
+  switched off.** Live ingestion shipped on the generic 600/min webhook bucket
+  and the load test refused half of a 100 req/s run — during what is, for a
+  seller, the best hour of their week. And the per-address *floor* must not apply
+  to `/api/`: a webhook provider is one address by definition, so the floor
+  becomes the binding constraint and the endpoint's own key becomes decoration.
+- **A generated column has to be IMMUTABLE, and `timestamptz + interval` is not.**
+  Adding an interval depends on the session TimeZone. `breach_log.notify_due_at`
+  is a plain column maintained by a trigger for that reason.
+- **A consent log ordered by `created_at` is a coin flip.** Same trap as the SMS
+  credit ledger: `now()` is the transaction timestamp, so a grant and a
+  withdrawal written together tie and the tiebreak falls to a random uuid.
+  `privacy_consents.seq` is `generated always as identity`.
+- **The default of every error-tracking SDK is a personal-data breach here.**
+  They send the URL, the headers, the cookies and the breadcrumb trail, and on
+  this platform each of those carries a phone number, an address or a cart token
+  that *is* a session. `src/lib/telemetry/scrub.ts` is deny-by-shape, and
+  `report-error.ts` never sends `request.headers`, `request.cookies` or `user` at
+  all. Over-redaction is the right direction to be wrong in — but not so far that
+  a report says an unknown thing failed for an unknown reason, which is why a
+  bare `name` is *not* on the unsafe-key list.
+- **A signed-differently load test measures the reject.** Driving the live
+  webhook without `X-Hub-Signature-256` gets a 401 from the first line of the
+  handler, and reports excellent numbers for routing.
+- **Never `fetch` a `*.localhost` store from Node — including in a load test.**
+  Same trap CLAUDE.md already records for HTTP checks: `Host` is forbidden for
+  `fetch`, so the request arrives as `127.0.0.1` and gets the dashboard shell,
+  which is a *fast 200 for the wrong page*.
 - **A coverage ratio has to compare like with like.** `costedFraction` measured
   item line totals against order grand totals, which carry shipping and COD fees
   no line accounts for — so a store with perfect cost data still read 97% and

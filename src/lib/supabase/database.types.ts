@@ -292,6 +292,91 @@ export type Database = {
           },
         ]
       }
+      breach_log: {
+        Row: {
+          affected_count: number | null
+          created_at: string
+          data_categories: string[]
+          description: string
+          discovered_at: string
+          id: string
+          nature: string
+          notifiable: boolean | null
+          notify_due_at: string
+          npc_notified_at: string | null
+          occurred_at: string | null
+          recorded_by: string | null
+          remediation: string | null
+          severity: string
+          status: string
+          subjects_notified_at: string | null
+          tenant_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          affected_count?: number | null
+          created_at?: string
+          data_categories?: string[]
+          description: string
+          discovered_at: string
+          id?: string
+          nature: string
+          notifiable?: boolean | null
+          notify_due_at: string
+          npc_notified_at?: string | null
+          occurred_at?: string | null
+          recorded_by?: string | null
+          remediation?: string | null
+          severity?: string
+          status?: string
+          subjects_notified_at?: string | null
+          tenant_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          affected_count?: number | null
+          created_at?: string
+          data_categories?: string[]
+          description?: string
+          discovered_at?: string
+          id?: string
+          nature?: string
+          notifiable?: boolean | null
+          notify_due_at?: string
+          npc_notified_at?: string | null
+          occurred_at?: string | null
+          recorded_by?: string | null
+          remediation?: string | null
+          severity?: string
+          status?: string
+          subjects_notified_at?: string | null
+          tenant_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "breach_log_recorded_by_fkey"
+            columns: ["recorded_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "breach_log_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "breach_log_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       broadcast_recipients: {
         Row: {
           address: string | null
@@ -1455,6 +1540,82 @@ export type Database = {
           },
           {
             foreignKeyName: "customers_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      data_subject_requests: {
+        Row: {
+          created_at: string
+          due_at: string
+          id: string
+          kind: string
+          note: string | null
+          outcome: Json | null
+          refused_reason: string | null
+          requested_at: string
+          served_at: string | null
+          served_by: string | null
+          status: string
+          subject_email: string | null
+          subject_phone: string
+          tenant_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          due_at?: string
+          id?: string
+          kind: string
+          note?: string | null
+          outcome?: Json | null
+          refused_reason?: string | null
+          requested_at?: string
+          served_at?: string | null
+          served_by?: string | null
+          status?: string
+          subject_email?: string | null
+          subject_phone: string
+          tenant_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          due_at?: string
+          id?: string
+          kind?: string
+          note?: string | null
+          outcome?: Json | null
+          refused_reason?: string | null
+          requested_at?: string
+          served_at?: string | null
+          served_by?: string | null
+          status?: string
+          subject_email?: string | null
+          subject_phone?: string
+          tenant_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "data_subject_requests_served_by_fkey"
+            columns: ["served_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "data_subject_requests_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "data_subject_requests_tenant_id_fkey"
             columns: ["tenant_id"]
             isOneToOne: false
             referencedRelation: "tenants"
@@ -3776,6 +3937,70 @@ export type Database = {
           },
         ]
       }
+      privacy_consents: {
+        Row: {
+          created_at: string
+          customer_id: string | null
+          evidence: Json
+          granted: boolean
+          id: string
+          order_id: string | null
+          policy_version: string
+          purpose: string
+          seq: number
+          source: string
+          tenant_id: string
+        }
+        Insert: {
+          created_at?: string
+          customer_id?: string | null
+          evidence?: Json
+          granted: boolean
+          id?: string
+          order_id?: string | null
+          policy_version: string
+          purpose?: string
+          seq?: never
+          source?: string
+          tenant_id: string
+        }
+        Update: {
+          created_at?: string
+          customer_id?: string | null
+          evidence?: Json
+          granted?: boolean
+          id?: string
+          order_id?: string | null
+          policy_version?: string
+          purpose?: string
+          seq?: never
+          source?: string
+          tenant_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "privacy_consents_tenant_id_customer_id_fkey"
+            columns: ["tenant_id", "customer_id"]
+            isOneToOne: false
+            referencedRelation: "customers"
+            referencedColumns: ["tenant_id", "id"]
+          },
+          {
+            foreignKeyName: "privacy_consents_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "storefront_tenants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "privacy_consents_tenant_id_fkey"
+            columns: ["tenant_id"]
+            isOneToOne: false
+            referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       product_images: {
         Row: {
           alt: string | null
@@ -4349,6 +4574,24 @@ export type Database = {
           island_group?: string
           name?: string
           region_name?: string
+        }
+        Relationships: []
+      }
+      rate_limit_counters: {
+        Row: {
+          bucket: string
+          hits: number
+          window_start: string
+        }
+        Insert: {
+          bucket: string
+          hits?: number
+          window_start: string
+        }
+        Update: {
+          bucket?: string
+          hits?: number
+          window_start?: string
         }
         Relationships: []
       }
@@ -4971,11 +5214,11 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "sms_credit_entries_sms_log_id_fkey"
-            columns: ["sms_log_id"]
+            foreignKeyName: "sms_credit_entries_sms_log_fkey"
+            columns: ["tenant_id", "sms_log_id"]
             isOneToOne: false
             referencedRelation: "sms_logs"
-            referencedColumns: ["id"]
+            referencedColumns: ["tenant_id", "id"]
           },
           {
             foreignKeyName: "sms_credit_entries_tenant_id_fkey"
@@ -6414,6 +6657,33 @@ export type Database = {
         }
         Returns: boolean
       }
+      breach_list: { Args: { p_tenant_id?: string }; Returns: Json }
+      breach_record: {
+        Args: {
+          p_affected_count?: number
+          p_data_categories?: string[]
+          p_description: string
+          p_discovered_at?: string
+          p_nature: string
+          p_severity?: string
+          p_tenant_id?: string
+        }
+        Returns: string
+      }
+      breach_update: {
+        Args: {
+          p_affected_count?: number
+          p_discovered_at?: string
+          p_id: string
+          p_notifiable?: boolean
+          p_npc_notified_at?: string
+          p_remediation?: string
+          p_severity?: string
+          p_status?: string
+          p_subjects_notified_at?: string
+        }
+        Returns: undefined
+      }
       broadcast_channel_for: {
         Args: { p_channel?: string; p_customer_id: string }
         Returns: string
@@ -6653,6 +6923,10 @@ export type Database = {
       }
       current_reseller: { Args: never; Returns: string }
       current_tenant_id: { Args: never; Returns: string }
+      customer_may_market: {
+        Args: { p_customer_id: string; p_tenant_id: string }
+        Returns: boolean
+      }
       customer_profile: { Args: { p_customer_id: string }; Returns: Json }
       customer_segment_count: {
         Args: { p_definition: Json; p_tenant_id: string }
@@ -6759,6 +7033,26 @@ export type Database = {
         }
         Returns: Json
       }
+      dsr_close: {
+        Args: { p_reason?: string; p_request_id: string; p_status: string }
+        Returns: undefined
+      }
+      dsr_export: {
+        Args: { p_phone: string; p_tenant_id: string }
+        Returns: Json
+      }
+      dsr_list: { Args: { p_tenant_id: string }; Returns: Json }
+      dsr_open: {
+        Args: {
+          p_email?: string
+          p_kind: string
+          p_note?: string
+          p_phone: string
+          p_tenant_id: string
+        }
+        Returns: string
+      }
+      dsr_serve_deletion: { Args: { p_request_id: string }; Returns: Json }
       has_tenant_role: {
         Args: {
           p_min_role: Database["public"]["Enums"]["tenant_role"]
@@ -7051,6 +7345,7 @@ export type Database = {
         }
         Returns: Json
       }
+      privacy_policy_version: { Args: never; Returns: string }
       public_tracking: {
         Args: { p_domain: string; p_order_number: string; p_slug: string }
         Returns: Json
@@ -7066,6 +7361,11 @@ export type Database = {
         }
         Returns: Json
       }
+      rate_limit_hit: {
+        Args: { p_bucket: string; p_limit: number; p_window_seconds?: number }
+        Returns: Json
+      }
+      rate_limit_sweep: { Args: { p_older_than?: string }; Returns: number }
       record_booking_failure: {
         Args: {
           p_code?: string
@@ -7076,6 +7376,16 @@ export type Database = {
           p_tenant_id: string
         }
         Returns: undefined
+      }
+      record_checkout_consent: {
+        Args: {
+          p_evidence?: Json
+          p_granted: boolean
+          p_order_id: string
+          p_policy_version: string
+          p_token: string
+        }
+        Returns: boolean
       }
       record_cod_remittance: {
         Args: { p_amount?: number; p_note?: string; p_order_id: string }
@@ -7335,6 +7645,15 @@ export type Database = {
           p_tenant_id: string
         }
         Returns: undefined
+      }
+      set_marketing_consent: {
+        Args: {
+          p_customer_id: string
+          p_granted: boolean
+          p_note?: string
+          p_tenant_id: string
+        }
+        Returns: boolean
       }
       set_marketplace_credentials: {
         Args: {

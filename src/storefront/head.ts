@@ -101,6 +101,19 @@ export function buildHead({ data, origin, storageOrigin, path }: HeadInput): Hea
     }
   }
 
+  /**
+   * The privacy notice is the one page in this group that *should* be indexed.
+   * A notice that search cannot find is a notice a buyer cannot check before
+   * they buy, which is the moment it exists for.
+   */
+  if (data.route === 'privacy') {
+    return {
+      title: `Privacy · ${data.store?.name ?? 'Selld'}`,
+      tags: '',
+      jsonLd: null,
+    }
+  }
+
   if (data.route === 'not-found') {
     return {
       title: 'Store not found · Selld',

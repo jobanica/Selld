@@ -25,7 +25,7 @@ phase's scope and done-when criteria.
 | 17 | Marketplace sync | ✅ Complete |
 | 18 | Analytics & true profit | ✅ Complete |
 | 19 | Billing, super admin & white-label | ✅ Complete |
-| 20 | Hardening & launch | ⬜ Next |
+| 20 | Hardening & launch | ✅ Complete |
 
 Phases 0–9 are a complete sellable product. MVP for first paying customers is
 0 → 11.
@@ -1900,3 +1900,98 @@ than "something went wrong".
 Twenty-five sabotages of the phase-19 guards, every one caught by the probe —
 after four of them came back green and turned out to be gaps in the probe, not
 guards that held.
+
+---
+
+## Phase 20 — Hardening & launch
+
+**Done-when criterion**
+
+> A fresh signup can go live and process a real paid order with zero support
+> contact.
+
+The hard part of that sentence is the last three words: you cannot assert that
+nobody asked for help. So the run (`p20-ui.mjs`) is built so that *needing* help
+fails — no fixture is inserted on the seller's behalf, no SQL sets up their
+store, and every step is a click on a screen. If the product needed a human at
+any point, there would have been nothing to click.
+
+| Who | What | Result |
+|---|---|---|
+| a brand new person | signed in with an email and a code | account, no forms |
+| them | created the store on the screen they were sent to | live, with a plan from the first second |
+| them | pressed through the wizard | Continue · Continue · Skip for now · Continue · **Open my store** |
+| the home screen | told them what was left | "Before you go live — 3 steps left" |
+| them | added one product | published |
+| a stranger | opened the store and bought it | order **0001**, ₱579.00 COD, priced by the server |
+| the buyer | ticked the marketing box | consent recorded, with the policy version and a hashed IP |
+| the seller | tapped Confirm | `confirmed`, and on the packing screen |
+| the seller, **offline** | opened the packing list | still readable, and says *"You are offline. This is what we knew at 1:39 PM."* |
+
+Not one line of SQL set anything up for the seller. The only writes outside the
+browser were the buyer's own checkout and one opening-stock line.
+
+### What shipped
+
+- **Rate limiting on every public path**, with counters in Postgres — a
+  per-process counter that resets on deploy is not a limit — and **failing open**
+  on any error, because abuse is recoverable and a storefront returning 429 to
+  real buyers during an incident is not.
+- **An RLS penetration test per table** (`supabase/tests/rls-coverage.sql`). It
+  checks the tables nobody wrote an assertion for: RLS on and forced, a policy or
+  a documented reason for having none, `tenant_id NOT NULL` or a reason, every FK
+  between two tenant-scoped tables carrying `tenant_id`, no client role reaching
+  an encrypted credential column, and `anon` holding nothing but PSGC.
+- **Data Privacy Act**: consent at checkout (for *marketing*, never for the
+  order), a real data export, deletion served by **erasure**, and a breach log
+  whose 72-hour clock runs from discovery rather than from typing.
+- **A PWA**: manifest, generated icons including a maskable one, and a service
+  worker that caches the shell and refuses to cache anything tenant-scoped. The
+  packing list survives no signal through a per-tenant snapshot cleared on
+  sign-out, and moves made offline queue rather than fail.
+- **Error tracking**, hand-written against the Sentry envelope, because every
+  SDK's default is to send the URL, the headers and the cookies — which on this
+  platform is a phone number, an address and a session.
+- **A load test** at 100 req/s, open-loop, measuring from when each request was
+  *due* so a backlog is visible rather than hidden.
+- **A first-run checklist**, a Taglish help screen, and the demo tenant.
+
+### Measured
+
+| | checkout page | live comment ingest |
+|---|---|---|
+| rate | 100 req/s for 15s | 100 req/s for 15s |
+| 2xx | 1500 | 1500 |
+| 5xx / dropped | **0** | **0** |
+| p50 | 5ms | 7ms |
+| p99 | 34ms | 19ms |
+
+### Notable findings
+
+| Symptom | Cause |
+|---|---|
+| Live ingestion refused half a 100 req/s run | It shipped on the generic 600/min webhook bucket, and the per-address floor was also being applied to `/api/` — where a webhook provider *is* one address. A rate limit below the throughput of the feature it protects is the feature switched off in the seller's best hour. |
+| One cross-tenant child was representable | Found by the new per-table sweep, not by anybody reading the file: `sms_credit_entries.sms_log_id` was a plain FK, so a ledger entry could point at another store's message. Nothing leaked — the read path joins through a policied table — but "the row cannot be written" is the stronger statement, and it is the one the composite-FK rule exists to make. |
+| `notify_due_at` would not compile as a generated column | `timestamptz + interval` is only STABLE, because adding an interval depends on the session TimeZone. It is a plain column maintained by a trigger. |
+| "The most recent consent wins" was a coin flip | `now()` is the transaction timestamp, so a grant and a withdrawal written together tie and the tiebreak fell to a random uuid. The same bug the SMS credit ledger had in phase 11. `privacy_consents.seq` is an identity column. |
+| The load test reported nothing at all | `Host` is a forbidden header for `fetch` and Node does not resolve `*.localhost`. Driven through `node:http` now — the alternative is a fast 200 for the wrong page. |
+
+### Deliberately deferred
+
+- **No STOP-keyword handling.** Withdrawal is available to the seller on the
+  customer profile and through the request queue, and the SMS copy tells buyers to
+  reply STOP — but nothing parses an inbound SMS yet, because no provider
+  integration in this build receives one. The mechanism it would call already
+  exists.
+- **Consent is opt-out, not opt-in**, and that is argued in the migration: every
+  customer in the table got there by buying something, and requiring a fresh
+  opt-in would have silently emptied sixteen phases of audiences overnight. An
+  explicit grant is recorded when given, which is strictly better evidence.
+- **The service worker caches the shell only.** Offline *data* is per-tenant, in
+  the app, cleared on sign-out — an HTTP cache on a shared phone is one seller
+  reading another's orders.
+- **No Sentry SDK.** See `src/lib/telemetry/report-error.ts` for the argument.
+
+**Gate:** `pnpm verify` (554 tests), `pnpm db:test` (706 tenancy assertions plus
+the new per-table RLS coverage suite), `pnpm db:test:concurrency`, `pnpm
+load:test`. All 25 migrations apply from scratch on PG 17.6.

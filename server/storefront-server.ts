@@ -39,6 +39,8 @@ import {
   startMarketplaceWorker,
 } from './marketplace-routes'
 import { serveSocialRoutes, serveSocialWebhook } from './social-routes'
+import { clientIp, guard, startRateLimitSweeper } from './rate-limit'
+import { initTelemetry, reportError } from '@/lib/telemetry/report-error'
 import {
   readPlatformBillingConfig,
   serveBillingRoutes,
@@ -130,6 +132,7 @@ async function main() {
     }).catch(
       (error: unknown) => {
         console.error('[storefront] unhandled', error)
+        reportError(error, { url: request.url ?? '/', tags: { surface: 'storefront' } })
         if (!response.headersSent) {
           response.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' })
         }
@@ -142,6 +145,15 @@ async function main() {
   // nothing HTTP happens when a buyer reserves the last unit, and the deadline
   // is measured from that moment. Started only where the service role exists,
   // because without it there is nothing the worker could do but log failures.
+  // Server-side reporting uses the same envelope and the same scrubber as the
+  // browser. A stack trace from the SSR renderer carries exactly the same buyer
+  // data as one from the client, and there is no reason for two policies.
+  initTelemetry(
+    process.env.SENTRY_DSN === undefined || process.env.SENTRY_DSN === ''
+      ? null
+      : { dsn: process.env.SENTRY_DSN, environment: process.env.VITE_APP_ENV ?? 'development' },
+  )
+
   registerMarketplaceProviders()
   const service = readServiceConfig()
   if (service !== null) startMarketplaceWorker(service)
@@ -151,6 +163,10 @@ async function main() {
   // not need the key that can charge cards.
   const billing = readPlatformBillingConfig()
   if (service !== null && billing !== null) startBillingWorker(service, billing)
+
+  // Rate-limit windows nobody can still be inside. On a timer, never on the
+  // request path — the buyer must not pay for our housekeeping.
+  if (service !== null) startRateLimitSweeper(service)
 
   server.listen(PORT, () => {
     console.log(
@@ -308,6 +324,34 @@ async function handle(
   const hostname = host.split(':')[0] ?? ''
   const url = new URL(request.url ?? '/', `http://${host || 'localhost'}`)
 
+  /**
+   * The floor under everything below.
+   *
+   * Every public path gets a tighter, better-keyed limit at its own call site;
+   * this one exists for the paths that have no better key than the address, and
+   * so that a flood on a path nobody thought about still costs something. It is
+   * deliberately loose: a mobile network hands one address to a whole city, so
+   * the number here has to fit a barangay of shoppers rather than one person.
+   *
+   * Static assets are excluded. They are cached, they are cheap, and counting
+   * them would mean one page load spent a tenth of the budget.
+   *
+   * So is everything under `/api/`, and that exclusion is load-bearing rather
+   * than cosmetic. A webhook provider *is* one address — Facebook posts from a
+   * handful of them — so a per-address floor applied to `/api/` makes the floor
+   * the binding constraint and the endpoint's own, better-keyed limit
+   * decorative. The load test found this immediately: live ingestion was
+   * refused at exactly the storefront floor while its own 6,000/min counter sat
+   * at 600. Every `/api/` route below guards itself.
+   */
+  if (
+    !isViteAsset(url.pathname) &&
+    !url.pathname.startsWith('/assets/') &&
+    !url.pathname.startsWith('/api/')
+  ) {
+    if (await guard(request, response, 'storefront', clientIp(request))) return
+  }
+
   // Webhooks are answered before any surface routing. A provider posts to whatever
   // host was configured — often the apex, which resolves to the dashboard surface —
   // and its delivery must not depend on which store the hostname happens to name.
@@ -398,9 +442,22 @@ async function handle(
   // Mutations are POST-only. A cart that can be changed by a GET is a cart that
   // a prefetcher, a crawler or an <img> tag can change.
   if (request.method === 'POST') {
-    if (url.pathname === '/cart/add') return handleCartAdd(request, response, context.supabase, store)
-    if (url.pathname === '/cart/qty') return handleCartQty(request, response, context.supabase, store)
+    // Keyed on the cart cookie where there is one. A cart is one buyer, so this
+    // throttles the person hammering rather than the network they share — and a
+    // caller with no cart yet falls back to the address, which is the only thing
+    // known about them.
+    const cartKey = parseCookies(request)[CART_COOKIE] ?? clientIp(request)
+
+    if (url.pathname === '/cart/add') {
+      if (await guard(request, response, 'cart', cartKey)) return
+      return handleCartAdd(request, response, context.supabase, store)
+    }
+    if (url.pathname === '/cart/qty') {
+      if (await guard(request, response, 'cart', cartKey)) return
+      return handleCartQty(request, response, context.supabase, store)
+    }
     if (url.pathname === '/checkout') {
+      if (await guard(request, response, 'checkout', cartKey)) return
       const outcome = await handleCheckoutPost(request, response, context.supabase, store)
       if (outcome.kind === 'redirect') return
       // Re-render the form: either the buyer needs the next address level, or
@@ -483,6 +540,11 @@ async function handle(
   // `0001` and neither can read the other's.
   const trackMatch = /^\/track\/([A-Za-z0-9][A-Za-z0-9._-]{0,39})\/?$/.exec(url.pathname)
   if (trackMatch !== null) {
+    // Keyed on the order number, which is the capability being used. Somebody
+    // enumerating numbers gets a fresh bucket per guess and is caught by the
+    // per-address floor above instead — the two together are the guard, and
+    // neither is on its own.
+    if (await guard(request, response, 'tracking', trackMatch[1] ?? '')) return
     const [branding, tracking] = await Promise.all([
       fetchStoreBranding(context.supabase, store),
       fetchTracking(context.supabase, store, trackMatch[1] ?? ''),
@@ -494,6 +556,23 @@ async function handle(
         route: 'track',
         store: branding,
         tracking,
+      })
+    }
+  }
+
+  // The privacy notice. On the store's own domain and in the store's locale,
+  // because the Act requires the buyer be *informed* — a notice on our marketing
+  // site, in English, is not that.
+  if (url.pathname === '/privacy' || url.pathname === '/privacy/') {
+    const [branding, version] = await Promise.all([
+      fetchStoreBranding(context.supabase, store),
+      fetchPolicyVersion(context.supabase),
+    ])
+    if (branding !== null) {
+      return renderPage(request, response, context, url, {
+        route: 'privacy',
+        store: branding,
+        policyVersion: version,
       })
     }
   }
@@ -597,6 +676,22 @@ async function loadPageData(
  * function already returns the store, the product it also returns is one row, and
  * a second function would be a second thing to keep in step with the theme.
  */
+/**
+ * The version of the notice on this page.
+ *
+ * Read from the database and cached for the process, so the string the buyer is
+ * shown and the string stamped on their consent row are the same string. Falling
+ * back to a literal here would record agreement to a version this file invented.
+ */
+let policyVersionCache: string | null = null
+async function fetchPolicyVersion(supabase: SupabaseConfig): Promise<string> {
+  if (policyVersionCache !== null) return policyVersionCache
+  policyVersionCache = await rpc<string>(supabase, 'privacy_policy_version', {}).catch(
+    () => 'unknown',
+  )
+  return policyVersionCache
+}
+
 async function fetchStoreBranding(
   supabase: SupabaseConfig,
   store: StoreRef,

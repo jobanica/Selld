@@ -5,6 +5,7 @@ import { smsRegistry } from '@/core/sms'
 
 import { registerSmsProviders } from './order-notifications'
 import { readServiceConfig } from './payment-webhook'
+import { check } from './rate-limit'
 import { registerSocialProviders } from './social-routes'
 import { readSupabaseConfig, rpc, type SupabaseConfig } from './supabase-rpc'
 
@@ -252,6 +253,17 @@ export async function serveShortLink(
 
   const slug = url.pathname.slice(SHORT_LINK_PREFIX.length).split('/')[0] ?? ''
   if (!/^[a-z0-9]{5,12}$/.test(slug)) return false
+
+  // Per slug. A short link is a capability held by everyone the SMS was
+  // forwarded to, so the thing worth limiting is one link being hammered — not
+  // one address, which is a whole mobile network.
+  const rate = await check('shortLink', slug)
+  if (!rate.allowed) {
+    response
+      .writeHead(429, { 'Retry-After': String(rate.retryAfter), 'Cache-Control': 'no-store' })
+      .end('Too many requests')
+    return true
+  }
 
   const anon = readSupabaseConfig()
   if (anon === null) {

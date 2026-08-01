@@ -2,6 +2,8 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 
 import { XenditProvider } from '@/core/payments/xendit-provider'
 
+import { guard } from './rate-limit'
+
 import { rpc, type SupabaseConfig } from './supabase-rpc'
 
 /**
@@ -207,6 +209,13 @@ export async function serveXenditWebhook(
     send(response, 405, { error: 'method_not_allowed' })
     return true
   }
+
+  // Keyed on the opaque account slug, so one seller's provider having a bad day
+  // cannot spend another seller's budget. A 429 is the right answer here rather
+  // than a 200: Xendit retries a non-2xx, so a refused delivery comes back
+  // instead of being lost.
+  const slug = pathname.slice(WEBHOOK_PREFIX.length).split('/')[0] ?? ''
+  if (await guard(request, response, 'webhook', slug)) return true
 
   let rawBody: string
   try {

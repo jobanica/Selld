@@ -9,6 +9,7 @@ import { HomePage } from './pages/home-page'
 import { OrderConfirmedPage } from './pages/order-confirmed-page'
 import { ProductPage } from './pages/product-page'
 import { StoreNotFound } from './pages/store-not-found'
+import { PrivacyPage } from './pages/privacy-page'
 import { TrackingPage } from './pages/tracking-page'
 import type { PageData } from './storefront-data'
 import { StorefrontProvider } from './storefront-provider'
@@ -69,6 +70,8 @@ export function StorefrontRoot({
       <OrderConfirmedPage receipt={data.receipt} />
     ) : data.route === 'track' ? (
       <TrackingPage data={data.tracking} />
+    ) : data.route === 'privacy' ? (
+      <PrivacyPage policyVersion={data.policyVersion} />
     ) : (
       <StoreNotFound hostname={data.route === 'not-found' ? data.hostname : origin} />
     )

@@ -19,6 +19,7 @@ import {
   type OAuthConfig,
 } from '@/core/social/graph'
 
+import { guard } from './rate-limit'
 import { readServiceConfig } from './payment-webhook'
 import { readSupabaseConfig, rpc, type SupabaseConfig } from './supabase-rpc'
 
@@ -534,6 +535,11 @@ async function serveAgentReply(
     send(response, 405, { error: 'method_not_allowed' })
     return true
   }
+
+  // One bucket for the endpoint. There is no per-account key available before the
+  // signature is checked, and inventing one from the body would let a caller pick
+  // their own bucket.
+  if (await guard(request, response, 'webhook', 'social')) return true
 
   const service = readServiceConfig()
   const anon = readSupabaseConfig()

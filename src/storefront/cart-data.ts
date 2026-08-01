@@ -229,6 +229,12 @@ export type CartPageData =
    * be told that in a place that still looks like the shop they bought from.
    */
   | { route: 'track'; store: Store | null; tracking: TrackingPayload | null }
+  /**
+   * The privacy notice. Carries the policy version rather than deriving it in the
+   * component, so the string a buyer was shown and the string stamped on their
+   * consent row come from the same place.
+   */
+  | { route: 'privacy'; store: Store | null; policyVersion: string }
 
 export interface PsgcUnit {
   code: string

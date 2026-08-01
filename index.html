@@ -5,6 +5,14 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#12604f" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
+    <!--
+      The manifest is what makes the dashboard installable. It is linked from
+      this document and not from the storefront's, deliberately: a buyer must
+      never be prompted to install the seller's admin app, and the storefront
+      carries an LCP budget that a manifest fetch would spend for nothing.
+    -->
+    <link rel="manifest" href="/manifest.webmanifest" />
     <title>Selld</title>
     <meta
       name="description"

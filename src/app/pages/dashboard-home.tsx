@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next'
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { fetchCommissionKept, fetchProfit } from '@/features/analytics/analytics-api'
+import { SetupChecklist } from '@/features/onboarding/setup-checklist'
 import { useActiveTenant } from '@/features/tenancy/use-tenant'
 import { formatPHP, fromDb } from '@/lib/money'
 import { formatManilaDate } from '@/lib/time/manila'
@@ -49,6 +50,11 @@ export function DashboardHome() {
           {formatManilaDate(new Date())} · {t('app.tagline')}
         </p>
       </header>
+
+      {/* Above the profit tile, and only until it is done. A store with no
+          products has no profit to read, and telling it so is less useful than
+          telling it what to do next. */}
+      <SetupChecklist />
 
       {/* Profit first, and it is a link: the number is an invitation to see the
           arithmetic, which is where the seller settles whether to believe it. */}

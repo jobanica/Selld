@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { createLogMessengerProvider, messengerRegistry } from '@/core/messaging'
 import { parseComment, type ParseResult } from '@/core/live/parser'
 
+import { guard } from './rate-limit'
 import { readServiceConfig } from './payment-webhook'
 import { rpc, type SupabaseConfig } from './supabase-rpc'
 
@@ -311,6 +312,12 @@ export async function serveLiveWebhook(
     send(response, 405, { error: 'method_not_allowed' })
     return true
   }
+
+  // A live session is the one public path that is *expected* to burst — 200
+  // comments in a minute is the feature working, and the build spec asks for
+  // 100 a second. Its own limit, well above that, because a limit below the
+  // feature's throughput is the feature switched off in the seller's best hour.
+  if (await guard(request, response, 'liveWebhook', channel)) return true
 
   const service = readServiceConfig()
   if (service === null || expected === '') {

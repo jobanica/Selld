@@ -3,12 +3,15 @@ import {
   BarChart3,
   Boxes,
   CreditCard,
+  HelpCircle,
   LayoutDashboard,
   Megaphone,
   MessageCircle,
   Package,
+  PackageCheck,
   Radio,
   Settings,
+  ShieldCheck,
   ShoppingBag,
   Store,
   Truck,
@@ -48,6 +51,7 @@ export const NAV_SECTIONS: NavSection[] = [
     items: [
       { to: '/', labelKey: 'dashboard', icon: LayoutDashboard, phase: 0 },
       { to: '/orders', labelKey: 'orders', icon: ShoppingBag, phase: 9 },
+      { to: '/packing', labelKey: 'packing', icon: PackageCheck, phase: 20 },
     ],
   },
   {
@@ -70,7 +74,9 @@ export const NAV_SECTIONS: NavSection[] = [
       { to: '/marketplaces', labelKey: 'marketplaces', icon: Store, phase: 17 },
       { to: '/analytics', labelKey: 'analytics', icon: BarChart3, phase: 18 },
       { to: '/billing', labelKey: 'billing', icon: Wallet, phase: 19 },
+      { to: '/privacy', labelKey: 'privacy', icon: ShieldCheck, phase: 20 },
       { to: '/settings', labelKey: 'settings', icon: Settings, phase: 2 },
+      { to: '/help', labelKey: 'help', icon: HelpCircle, phase: 20 },
     ],
   },
 ]
