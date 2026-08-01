@@ -551,6 +551,39 @@ one new file plus one registry line, and zero lines of order logic.
   `revoke all on function … from public;`. `\dp` shows the tell: `=X/postgres`, where
   the empty grantee is PUBLIC. A CI step asserts the ACL for every money-moving
   function so a new one cannot repeat it.
+- **And that whole lesson was moot, because the image grants `anon` EXECUTE
+  *directly*.** Supabase's Postgres ships
+  `alter default privileges in schema public grant all on tables/sequences/functions
+  to anon, authenticated, service_role`, so every object these migrations create is
+  handed to both client roles at CREATE time, before the migration's own narrow
+  grant runs. It defeats three things at once: the column lists that keep
+  `payment_accounts.secret_key`, `courier_accounts.credentials_encrypted` and
+  `carts.token` unreadable; every `revoke … from public` (a revoke from PUBLIC does
+  not take back what a role holds in its own right, so `record_payment_event`,
+  `impersonate_begin` and `broadcast_claim_next` were all anon-callable); and every
+  table where the *absence* of a grant is the control, the stock ledger's
+  append-only rule among them. It has to be undone in **phase 0** — a privilege is
+  attached when the object is created, so a later migration would have to revoke
+  everything and restate all ~160 grants from the other files. `service_role` is
+  deliberately left as the image has it: it is not a client role, and it reads
+  tables through invoker-rights functions (`marketplace_sellable`, `quote_shipping`)
+  that no migration grants it. Section 6 of `rls-coverage.sql` asserts the default
+  ACL itself, because a default privilege is invisible in any table's ACL until the
+  table exists — and it checks only the grantor that owns the schema's tables, since
+  the image's `supabase_admin` entry applies to nothing here and cannot be revoked
+  on a hosted project anyway.
+- **Nine tables have RLS on and no policy, and RLS is not what protects them from
+  `service_role`.** BYPASSRLS bypasses policies; for that role the control was
+  always "no grant", which the defaults above quietly removed. The revokes are
+  written out one table at a time in `20260801000000` rather than swept up by a
+  loop over "RLS on and no policy", so a table joining that list has to be named by
+  somebody who thought about it.
+- **The Postgres image CI runs has a stub `auth.uid()`.** It reads only the legacy
+  singular `request.jwt.claim.sub`; the coalescing version that also reads the
+  `request.jwt.claims` JSON is installed by GoTrue, which never runs in CI. A probe
+  that sets only the JSON form gets `auth.uid() = null`, and every membership check
+  then refuses it — which reads like a broken function and is a probe that never
+  signed in. `tests.login()` sets both on purpose; new CI probes must too.
 - **A `security_invoker` view cannot read a column its caller has no grant on.**
   `payment_accounts_safe` exists precisely to derive facts (`has_secret_key`,
   `secret_key_last4`) from columns with no SELECT grant, so under invoker's rights it
@@ -646,6 +679,18 @@ one new file plus one registry line, and zero lines of order logic.
   whatever is already in the database, so editing a migration and re-running the
   tests proves nothing about the edit. Sabotage a function with
   `create or replace` over the live database, or `pnpm db:reset` first.
+- **The local stack is not the database CI runs.** `supabase start` brings up
+  Postgres 17.6; CI's service container is the bare `supabase/postgres:15.8.1.060`
+  image, and they differ in ways that are invisible until something fails only in
+  CI: the default privileges above, the `auth.uid()` stub, and
+  `storage.buckets.public`, which does not exist on 15.8 — so the phase-2 pattern of
+  setting bucket columns inside a `do` block that checks
+  `information_schema.columns` first is not defensive nonsense, it is the only form
+  that applies on both. To reproduce CI, run the image directly rather than the CLI
+  stack. Gate on more than `pg_isready`: the image finishes wiring `pg_graphql`
+  after it accepts connections, and its schema-version event trigger fires on every
+  DDL, so applying migrations too early fails with `could not open relation with
+  OID` from a function no migration mentions.
 - **Quote the message, not the template.** `{{storeUrl}}` is twelve characters in
   the seller's textarea and about forty on the recipient's phone, and `{{name}}`
   and `{{code}}` move too — so measuring `sms_segments()` on the draft prices a

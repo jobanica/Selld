@@ -1197,10 +1197,54 @@ revoke all on function public.log_integration_attempt(uuid, text, text, text, te
  * by URL alone, and object names derived from order numbers are guessable enough
  * that obscurity is not a control.
  */
-insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
-values ('tenant-private', 'tenant-private', false, 5242880,
-        array['image/jpeg', 'image/png', 'image/webp', 'application/pdf'])
+insert into storage.buckets (id, name)
+values ('tenant-private', 'tenant-private')
 on conflict (id) do nothing;
+
+/**
+ * `public`, `file_size_limit` and `allowed_mime_types` exist only on newer
+ * storage schema revisions, so they are set dynamically — the same shape phase 2
+ * uses for `tenant-public`, and for the same reason.
+ *
+ * The bare `supabase/postgres` image CI pins ships the *base* storage schema; the
+ * extra columns are added by the storage service at boot, which CI does not run.
+ * So the straight `insert … (id, name, public, …)` this migration used to carry
+ * worked on every developer's local stack and failed on the twelfth migration in
+ * CI — where it aborted the run, which is why nothing after it was ever verified
+ * there either.
+ *
+ * Edited in place rather than repaired by a later migration, which is the one
+ * situation where that is the only option: the failure happens *during* this
+ * file, so no migration after it can ever run to fix it. It is safe because the
+ * two forms produce identical state wherever the old one worked.
+ */
+do $$
+begin
+  if exists (select 1 from information_schema.columns
+             where table_schema = 'storage' and table_name = 'buckets'
+               and column_name = 'public') then
+    -- Private, unlike `tenant-public`: these are proofs of payment.
+    execute $q$ update storage.buckets set public = false where id = 'tenant-private' $q$;
+  end if;
+
+  if exists (select 1 from information_schema.columns
+             where table_schema = 'storage' and table_name = 'buckets'
+               and column_name = 'file_size_limit') then
+    -- 5 MB. A GCash screenshot from a phone is bigger than a logo.
+    execute $q$ update storage.buckets set file_size_limit = 5242880
+                where id = 'tenant-private' $q$;
+  end if;
+
+  if exists (select 1 from information_schema.columns
+             where table_schema = 'storage' and table_name = 'buckets'
+               and column_name = 'allowed_mime_types') then
+    execute $q$ update storage.buckets
+                set allowed_mime_types =
+                  array['image/jpeg', 'image/png', 'image/webp', 'application/pdf']
+                where id = 'tenant-private' $q$;
+  end if;
+end;
+$$;
 
 -- Path convention: {tenant_id}/payments/{order_id}/{filename}
 create policy "Members read their tenant's private files"

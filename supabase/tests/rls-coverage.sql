@@ -360,6 +360,66 @@ begin
 end;
 $$;
 
+-- ---------------------------------------------------------------------------
+-- 6. Nothing hands out a privilege before the migration can narrow it
+-- ---------------------------------------------------------------------------
+\echo ''
+\echo '=== Default privileges'
+
+-- The two checks above ask what a role holds *today*. This one asks what the
+-- next table will be born holding, which is the question that had a wrong answer
+-- for twenty phases.
+--
+-- Supabase's Postgres image ships
+--
+--   alter default privileges in schema public
+--     grant all on tables/sequences/functions to anon, authenticated, service_role;
+--
+-- so every object these migrations create was handed to `anon` in full at CREATE
+-- time. It defeated the column lists that keep `payment_accounts.secret_key` and
+-- `carts.token` unreadable, and — because EXECUTE landed on `anon` *directly* —
+-- it defeated every `revoke all on function … from public`, leaving
+-- `record_payment_event`, `impersonate_begin` and `broadcast_claim_next`
+-- anon-callable. Phase 0 revokes it; this asserts nobody put it back.
+--
+-- Checked here rather than table by table because a default privilege is not
+-- visible in any table's ACL until the table exists. A restored dump, a hosted
+-- project created before Supabase narrowed its own bootstrap, or one line in a
+-- future migration all reintroduce it, and every list-based check in this
+-- directory would keep passing for the tables already on the list.
+--
+-- Only one grantor's defaults matter, and it is not "all of them": a default
+-- privilege applies to objects created *by the role that set it*. The image also
+-- carries a `supabase_admin` entry, which no migration can revoke on a hosted
+-- project (postgres is not a member) and which never applies to anything here,
+-- because everything in this schema is created by the role running the
+-- migrations. So the check asks that role by asking who owns the tables.
+do $$
+declare
+  bad   text[] := '{}';
+  owner oid    := (select relowner from pg_class where oid = 'public.tenants'::regclass);
+begin
+  select coalesce(array_agg(
+           g.rolname || ' gets ' || a.privilege_type || ' on new ' ||
+           case d.defaclobjtype when 'r' then 'tables'
+                                when 'S' then 'sequences'
+                                when 'f' then 'functions'
+                                else d.defaclobjtype::text end
+           order by g.rolname, d.defaclobjtype, a.privilege_type), '{}')
+    into bad
+  from pg_default_acl d
+    join pg_namespace n on n.oid = d.defaclnamespace
+    cross join lateral aclexplode(d.defaclacl) a
+    join pg_roles g on g.oid = a.grantee
+  where n.nspname = 'public'
+    and d.defaclrole = owner
+    and g.rolname in ('anon', 'authenticated');
+
+  perform rlstests.fail(
+    'no default privilege in public grants anything to anon or authenticated', bad);
+end;
+$$;
+
 \echo ''
 \echo '=== RLS COVERAGE PASSED'
 \echo ''
