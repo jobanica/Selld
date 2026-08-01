@@ -1,4 +1,7 @@
 import { Menu, X } from 'lucide-react'
+import { useQuery } from '@tanstack/react-query'
+import { fetchOrders } from '@/features/orders/orders-api'
+import { useActiveTenant } from '@/features/tenancy/use-tenant'
 import { SelldMark } from '@/components/selld-logo'
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -109,6 +112,23 @@ function Sidebar({
   onNavigate: () => void
 }) {
   const { t } = useTranslation()
+  const tenant = useActiveTenant()
+
+  /*
+   * One cheap query for the whole sidebar. `orders_list` returns the per-view
+   * counts alongside the page, so asking for a single row buys every badge —
+   * and react-query dedupes it across navigations, so it is one request per
+   * session rather than one per screen.
+   */
+  const counts = useQuery({
+    queryKey: ['nav-counts', tenant.id],
+    queryFn: () => fetchOrders({ tenantId: tenant.id, view: 'needs_confirmation', limit: 1 }),
+    staleTime: 60_000,
+  })
+  const badges: Record<string, number> = {
+    '/orders': counts.data?.counts.needs_confirmation ?? 0,
+    '/packing': counts.data?.counts.to_pack ?? 0,
+  }
 
   return (
     <nav
@@ -145,9 +165,20 @@ function Sidebar({
               >
                 <item.icon className="size-4 shrink-0" aria-hidden="true" />
                 <span className="truncate">{t(`nav.${item.labelKey}`)}</span>
-                {item.phase > 0 && (
-                  <span className="ml-auto shrink-0 rounded bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground tabular">
-                    P{item.phase}
+                {/*
+                  A count of work waiting, not a phase number.
+                  
+                  This slot used to render `P{item.phase}` — the build-spec phase
+                  that made the route real, meant as a hint while a route was
+                  still a placeholder. Every phase has shipped, so it had become
+                  twenty tags reading P3, P9, P17 in a seller's sidebar: no
+                  meaning to them, and it reads like something is broken. What
+                  belongs here is the thing the reference dashboards put here —
+                  how many orders are waiting.
+                */}
+                {(badges[item.to] ?? 0) > 0 && (
+                  <span className="ml-auto shrink-0 rounded-full bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-primary">
+                    {badges[item.to]}
                   </span>
                 )}
               </NavLink>

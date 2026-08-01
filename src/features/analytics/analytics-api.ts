@@ -112,6 +112,41 @@ export async function fetchProfit(
   return data as unknown as Profit
 }
 
+/**
+ * The same figures for the period before this one, so a number can be shown
+ * against something.
+ *
+ * Two calls rather than a new RPC: `analytics_profit` already takes a window,
+ * and a "+18% vs last week" chip that is not derived from the actual previous
+ * week is decoration. If the previous window has no orders the delta is `null`
+ * and the UI shows nothing — a first-week seller comparing against zero would
+ * otherwise be told every number is up ∞%.
+ */
+export interface ProfitDelta {
+  revenue: number | null
+  profit: number | null
+  orders: number | null
+}
+
+export function previousWindow(days: number, now = new Date()): { current: Window; previous: Window } {
+  const day = 24 * 60 * 60 * 1000
+  const iso = (d: Date) => d.toISOString().slice(0, 10)
+  const end = new Date(now)
+  const start = new Date(now.getTime() - (days - 1) * day)
+  const prevEnd = new Date(start.getTime() - day)
+  const prevStart = new Date(prevEnd.getTime() - (days - 1) * day)
+  return {
+    current: { from: iso(start), to: iso(end) },
+    previous: { from: iso(prevStart), to: iso(prevEnd) },
+  }
+}
+
+/** Percentage change, or null when there is nothing to compare against. */
+export function percentChange(current: number, previous: number): number | null {
+  if (previous <= 0) return null
+  return Math.round(((current - previous) * 1000) / previous) / 10
+}
+
 export async function fetchCommissionKept(
   tenantId: string,
   range: Window = {},
