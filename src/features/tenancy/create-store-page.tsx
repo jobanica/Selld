@@ -11,7 +11,13 @@ import { createTenant } from '@/features/tenancy/tenancy-api'
 import { useTenant } from '@/features/tenancy/use-tenant'
 import type { Translate } from '@/lib/i18n'
 import { env } from '@/lib/env'
-import { isReservedSlug, isValidSlug, slugify } from '@/lib/tenant/resolve-tenant'
+import { errorMessage } from '@/lib/supabase/errors'
+import {
+  isReservedSlug,
+  isValidSlug,
+  slugify,
+  slugifyWhileTyping,
+} from '@/lib/tenant/resolve-tenant'
 
 /**
  * Shown when an authenticated user belongs to no tenant yet.
@@ -93,15 +99,19 @@ export function CreateStorePage() {
                 autoCorrect="off"
                 spellCheck={false}
                 value={effectiveSlug}
+                inputMode="url"
                 onChange={(event) => {
                   setSlugEdited(true)
-                  setSlug(event.target.value.toLowerCase())
+                  setSlug(slugifyWhileTyping(event.target.value))
                 }}
                 aria-invalid={slugProblem !== null}
                 aria-describedby="store-slug-hint"
               />
+              {/* Only ever show an address that could actually resolve. Echoing
+                  the raw value rendered `phase .selld.vercel.app` — a hostname
+                  with a space in it, presented to the seller as their shop. */}
               <p id="store-slug-hint" className="text-xs text-muted-foreground">
-                {effectiveSlug
+                {effectiveSlug !== '' && slugProblem === null
                   ? `${effectiveSlug}.${env.rootDomain}`
                   : t('tenant.slugHint')}
               </p>
@@ -142,16 +152,25 @@ export function CreateStorePage() {
   )
 }
 
+/**
+ * Note what this does NOT do: `cause instanceof Error`.
+ *
+ * `createTenant` throws whatever postgrest-js put in `error`, and on the
+ * ordinary destructuring path that is a **plain object** — the PostgrestError
+ * class is only constructed under `.throwOnError()`. Gating on `instanceof`
+ * therefore sent every real database failure to "something went wrong", so a
+ * seller whose chosen address was already taken was told nothing useful and had
+ * no reason to change it. Same trap as `describeStockError` and
+ * `describeShippingError`; `errorMessage()` is the fix.
+ */
 function describe(cause: unknown, t: Translate): string {
-  if (cause instanceof Error) {
-    const message = cause.message.toLowerCase()
-    // 23505 unique_violation — the slug was taken between our check and the insert.
-    if (message.includes('duplicate') || message.includes('already')) {
-      return t('tenant.slugTaken')
-    }
-    if (message.includes('reserved')) return t('tenant.slugReserved')
-    if (message.includes('invalid store address')) return t('tenant.slugInvalid')
-    return cause.message
+  const message = errorMessage(cause).toLowerCase()
+  if (message === '') return t('errors.unexpected')
+  // 23505 unique_violation — the slug was taken between our check and the insert.
+  if (message.includes('duplicate') || message.includes('already')) {
+    return t('tenant.slugTaken')
   }
-  return t('errors.unexpected')
+  if (message.includes('reserved')) return t('tenant.slugReserved')
+  if (message.includes('invalid store address')) return t('tenant.slugInvalid')
+  return errorMessage(cause)
 }

@@ -91,6 +91,27 @@ function isIpAddress(host: string): boolean {
  * Store slugs: lowercase alphanumeric plus internal hyphens, 3–63 characters.
  * Matches DNS label rules, since every slug becomes a hostname.
  */
+/**
+ * `slugify()` for a field somebody is still typing into.
+ *
+ * A phone keyboard inserts a space when you tap a word suggestion, so the first
+ * thing a seller does in the store-address field is produce one — and a raw
+ * space fails `isValidSlug`, which turned "type your store address" into an
+ * error message before the seller had finished the word. Spaces become hyphens
+ * here instead.
+ *
+ * It cannot just call `slugify()`, which strips trailing hyphens: that makes a
+ * hyphen impossible to type, because it is removed on the keystroke that enters
+ * it. So a *single* trailing separator survives, and `slugify()` cleans it up if
+ * the seller stops there.
+ */
+export function slugifyWhileTyping(value: string): string {
+  const endsWithSeparator = /[-\s_]$/.test(value)
+  const body = slugify(value)
+  if (!endsWithSeparator || body === '') return body
+  return `${body}-`.slice(0, 63)
+}
+
 export function isValidSlug(slug: string): boolean {
   return /^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])?$/.test(slug) && slug.length >= 3
 }
