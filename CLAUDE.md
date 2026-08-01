@@ -898,6 +898,26 @@ one new file plus one registry line, and zero lines of order logic.
   `payments` joined the type, six tests failed at *runtime* with "cannot read
   properties of undefined" instead of at the compiler. If a fixture needs a cast
   to compile, the fixture is wrong.
+- **A default parameter is where a missing value goes to hide.** `render()` takes
+  `cartCount = 0`, and the catalog render simply never passed it — so the cart
+  badge was empty on every home and product page since phase 6, and a buyer who
+  tapped "Add to cart" was redirected back to a page that showed no sign of it.
+  Nothing failed; the default was a plausible number. The hardcoded `0` on the
+  cart-family render *said* what it was doing and was found in a minute; the
+  omission said nothing and lasted fifteen phases.
+- **Anything per-buyer on a catalog page has to change the caching too.** Those
+  pages are edge-cached (`s-maxage=60`), so a cart count baked into shared HTML
+  is one buyer's cart served to the next — a worse bug than the empty badge.
+  The count is read only when a cart cookie is present, and a response carrying
+  one goes out `no-store, private`; every first visit and every crawler still
+  gets the cacheable document, which is the traffic the LCP budget is for.
+- **Feedback for a form post has to survive the redirect.** There is no
+  client-side router here, so by the time the buyer sees anything, the event
+  that would trigger an animation is two requests in the past. `selld_bump` is a
+  20-second cookie set by `/cart/add` and cleared by the render that uses it —
+  and the class it produces is *server-rendered*, so the animation plays on a
+  phone that has not finished downloading the JS. A JS-driven one would fire at
+  idle-after-load, seconds after the moment it exists to mark.
 - **The QR encoder is a dependency on purpose.** Reed-Solomon over GF(256), eight
   mask patterns and a BCH format field, whose failure mode is a code that renders
   beautifully and scans to nothing — discovered after the seller has printed two

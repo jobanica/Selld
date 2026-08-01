@@ -14,6 +14,7 @@ import { storeHref } from '../src/lib/tenant/resolve-tenant'
 import {
   appendSetCookie,
   CART_COOKIE,
+  cartBumpCookie,
   cartCookie,
   checkoutCookie,
   clearCartCookie,
@@ -224,7 +225,10 @@ export async function handleCartAdd(
     throw error
   }
 
-  return redirect(response, back, cookies)
+  // The buyer is redirected back to the page they were reading, so the only
+  // evidence that anything happened is the cart button. Carry the event across
+  // the redirect; `renderStore` turns it into one animation and clears it.
+  return redirect(response, back, [...cookies, cartBumpCookie()])
 }
 
 /** `POST /cart/qty` — set an exact quantity; 0 removes the line. */

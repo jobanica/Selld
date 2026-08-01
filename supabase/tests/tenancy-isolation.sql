@@ -1549,6 +1549,21 @@ begin
     (public.cart_view(v_token) ->> 'subtotal')::bigint,
     2 * (select price_centavos from public.storefront_variants where id = v_variant)::bigint,
     'the quote prices from the live variant price');
+
+  -- The badge count. Same token boundary as everything above, and the cheap half
+  -- of `cart_view` — it is called on every catalog page load, so pricing a whole
+  -- cart to render a number between 1 and 99 was never an option.
+  perform tests.eq(public.cart_item_count(v_token), 2,
+    'the badge counts the buyer''s own cart');
+  perform tests.eq(public.cart_item_count(v_other), 0,
+    'and cannot be pointed at another buyer''s');
+  perform tests.eq(public.cart_item_count(repeat('a', 64)), 0,
+    'a forged token counts zero rather than erroring on a catalog page');
+  perform tests.eq(public.cart_item_count(null), 0,
+    'and so does no token at all');
+  -- The count is a definer's answer, not a table read: `cart_items` stays shut.
+  perform tests.rejects($q$ select count(*) from public.cart_items $q$,
+    'anon still has no grant on cart_items');
 end;
 $$;
 

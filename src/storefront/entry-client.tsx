@@ -21,6 +21,7 @@ interface BootstrapState {
   origin: string
   basePath?: string
   cartCount?: number
+  cartBump?: boolean
 }
 
 function readState(): BootstrapState | null {
@@ -49,6 +50,7 @@ if (container !== null && state !== null) {
         origin={state.origin}
         basePath={state.basePath ?? ''}
         cartCount={state.cartCount ?? 0}
+        cartBump={state.cartBump ?? false}
       />
     </StrictMode>,
   )

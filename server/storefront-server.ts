@@ -28,7 +28,13 @@ import {
   readRememberedCheckout,
   type StoreRef,
 } from './cart-routes'
-import { CART_COOKIE, cartCookie, isSecureRequest } from './cookies'
+import {
+  CART_BUMP_COOKIE,
+  CART_COOKIE,
+  cartCookie,
+  clearCartBumpCookie,
+  isSecureRequest,
+} from './cookies'
 import { serveCourierRoutes } from './courier-routes'
 import { readServiceConfig, serveXenditWebhook } from './payment-webhook'
 import { serveLiveWebhook } from './live-routes'
@@ -659,7 +665,32 @@ async function handle(
     })
   }
 
-  const data = await loadPageData(context.supabase, { slug, domain, url, hostname })
+  /*
+   * The cart badge on a catalog page.
+   *
+   * It used to be hardcoded to 0 here, so a buyer who tapped "Add to cart" was
+   * redirected back to the product page and shown an empty cart — the thing they
+   * had just done looked like it had not happened.
+   *
+   * The reason it was 0 is real, though, and the fix has to keep faith with it:
+   * these pages are edge-cached (`s-maxage=60`), and a count baked into shared
+   * HTML is one buyer's cart served to the next. So the count is fetched only
+   * when the buyer actually has a cart cookie, and a response that carries one
+   * is sent `no-store, private` — the same rule `/cart` already lives by.
+   *
+   * Everyone else — every first visit, every crawler, every link opened from
+   * Messenger, which is the traffic the LCP budget exists for — still gets the
+   * cacheable public document, and pays nothing for this.
+   */
+  const token = cartTokenFrom(request)
+  const bumped = parseCookies(request)[CART_BUMP_COOKIE] === '1'
+
+  // In parallel, not in sequence. "One round trip per page" is a rule about
+  // latency, and two concurrent PostgREST calls cost the slower of the two.
+  const [data, cartCount] = await Promise.all([
+    loadPageData(context.supabase, { slug, domain, url, hostname }),
+    fetchCartCount(context.supabase, token),
+  ])
   const { render } = await context.loadRenderer()
 
   const rendered = render({
@@ -668,13 +699,41 @@ async function handle(
     storageOrigin: context.supabase.url,
     basePath,
     path: `${url.pathname}${url.search}`,
+    cartCount,
+    cartBump: bumped,
   })
 
   const document = await context.transformHtml(
     url.pathname,
     buildDocument(rendered, context.assets(), data),
   )
-  sendHtml(request, response, document, rendered.status)
+
+  if (token === null && !bumped) {
+    return sendHtml(request, response, document, rendered.status)
+  }
+  // Clearing the marker on the way out is what makes the animation play once
+  // rather than on every page the buyer opens for the next twenty seconds.
+  sendPrivateHtml(request, response, document, rendered.status, bumped ? [clearCartBumpCookie()] : [])
+}
+
+/**
+ * How many things are in the buyer's cart, for the badge.
+ *
+ * Failure is 0, never an error: a catalog page must not 500 because a count could
+ * not be read. The worst case is the badge a buyer sees on the page they were
+ * already reading, and the cart itself always counts for real.
+ */
+async function fetchCartCount(
+  supabase: SupabaseConfig,
+  token: string | null,
+): Promise<number> {
+  if (token === null) return 0
+  try {
+    const count = await rpc<number | null>(supabase, 'cart_item_count', { p_token: token })
+    return typeof count === 'number' && Number.isFinite(count) ? count : 0
+  } catch {
+    return 0
+  }
 }
 
 async function loadPageData(
@@ -885,7 +944,13 @@ async function renderPage(
     url.pathname,
     buildDocument(rendered, context.assets(), page),
   )
-  sendPrivateHtml(request, response, document, rendered.status)
+  // Clear the add-to-cart marker here too. A buyer who taps the cart link fast
+  // enough to beat the redirect would otherwise carry it to the next catalog
+  // page and see the animation for something they did a screen ago. Narrow, and
+  // one line to close.
+  const cookies =
+    parseCookies(request)[CART_BUMP_COOKIE] === '1' ? [clearCartBumpCookie()] : []
+  sendPrivateHtml(request, response, document, rendered.status, cookies)
 }
 
 async function renderCheckout(
@@ -934,6 +999,7 @@ function sendPrivateHtml(
   response: ServerResponse,
   body: string,
   status: number,
+  cookies: string[] = [],
 ): void {
   const { payload, encoding } = compress(request, body)
   response.writeHead(status, {
@@ -945,6 +1011,7 @@ function sendPrivateHtml(
     'Cache-Control': 'no-store, private',
     'X-Content-Type-Options': 'nosniff',
     'Referrer-Policy': 'strict-origin-when-cross-origin',
+    ...(cookies.length > 0 ? { 'Set-Cookie': cookies } : {}),
   })
   response.end(payload)
 }

@@ -34,6 +34,12 @@ export interface RenderInput {
   basePath?: string
   /** Items in the cart, for the header badge. */
   cartCount?: number
+  /**
+   * Whether the buyer just added something, so the cart button can say so.
+   *
+   * Travels in the payload for the same reason `cartCount` does — see below.
+   */
+  cartBump?: boolean
 }
 
 export interface RenderOutput {
@@ -66,6 +72,7 @@ export function render({
   path,
   basePath = '',
   cartCount = 0,
+  cartBump = false,
 }: RenderInput): RenderOutput {
   const html = renderToString(
     <StrictMode>
@@ -75,6 +82,7 @@ export function render({
         origin={origin}
         basePath={basePath}
         cartCount={cartCount}
+        cartBump={cartBump}
       />
     </StrictMode>,
   )
@@ -101,7 +109,7 @@ export function render({
     // server HTML to contain a <span> in <a>" — and React responded by discarding
     // the entire server-rendered tree and re-rendering from scratch. A silent
     // mismatch like that undoes the whole reason this surface is server-rendered.
-    state: serializeForScript({ data, storageOrigin, origin, basePath, cartCount }),
+    state: serializeForScript({ data, storageOrigin, origin, basePath, cartCount, cartBump }),
     preload: buildPreload({ data, storageOrigin }),
     status: statusFor(data),
   }

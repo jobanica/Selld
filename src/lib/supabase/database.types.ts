@@ -6784,6 +6784,7 @@ export type Database = {
         Returns: string
       }
       cart_id_for_token: { Args: { p_token: string }; Returns: string }
+      cart_item_count: { Args: { p_token: string }; Returns: number }
       cart_pricing: {
         Args: {
           p_cart_id: string

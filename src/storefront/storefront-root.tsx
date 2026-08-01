@@ -33,6 +33,8 @@ export interface StorefrontRootProps {
   basePath?: string
   /** Item count for the header badge; cart pages carry their own. */
   cartCount?: number
+  /** Whether this render follows an add-to-cart. */
+  cartBump?: boolean
 }
 
 /**
@@ -55,6 +57,7 @@ export function StorefrontRoot({
   origin,
   basePath = '',
   cartCount = 0,
+  cartBump = false,
 }: StorefrontRootProps) {
   const store = storeOf(data)
   const locale: Locale = store?.locale ?? 'en'
@@ -84,7 +87,7 @@ export function StorefrontRoot({
       {store === null ? (
         body
       ) : (
-        <StorefrontProvider value={{ store, storageOrigin, origin, basePath, cartCount }}>
+        <StorefrontProvider value={{ store, storageOrigin, origin, basePath, cartCount, cartBump }}>
           {body}
         </StorefrontProvider>
       )}

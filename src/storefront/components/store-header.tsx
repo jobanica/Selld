@@ -2,6 +2,7 @@ import { ShoppingBag } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 
 import { storeHref } from '@/lib/tenant/resolve-tenant'
+import { cn } from '@/lib/utils'
 
 import { useStorageUrl, useStoreHref, useStorefront } from '../use-storefront'
 import { StoreOpenBadge } from './store-info'
@@ -26,7 +27,7 @@ export function StoreHeader({
   showSearch?: boolean
 }) {
   const { t } = useTranslation()
-  const { store, cartCount, basePath } = useStorefront()
+  const { store, cartCount, cartBump, basePath } = useStorefront()
   const href = useStoreHref()
   const toUrl = useStorageUrl()
   const logo = toUrl(store.logoPath)
@@ -80,14 +81,24 @@ export function StoreHeader({
           </form>
         )}
 
-      {/* Cart. A plain link, so it works before hydration and is crawl-safe. */}
+      {/*
+        Cart. A plain link, so it works before hydration and is crawl-safe.
+
+        `cart-bump` is the whole feedback loop for adding something. There is no
+        client-side router here: "Add to cart" is a real POST and a redirect, so
+        by the time the buyer sees anything they are back on the page they were
+        already reading and the only evidence is this button. The animation is
+        pure CSS and the class is server-rendered, so it plays on a phone that has
+        not finished downloading the JavaScript — which is most phones, on the
+        first visit, on mobile data.
+      */}
         <a
           href={href('/cart')}
-          className={
-            showSearch
-              ? 'relative grid size-11 shrink-0 place-items-center rounded-full hover:bg-accent'
-              : 'relative ml-auto grid size-11 shrink-0 place-items-center rounded-full hover:bg-accent'
-          }
+          className={cn(
+            'relative grid size-11 shrink-0 place-items-center rounded-full hover:bg-accent',
+            !showSearch && 'ml-auto',
+            cartBump && 'cart-bump',
+          )}
           aria-label={t('cart.openWithCount', { count: cartCount })}
         >
           <ShoppingBag className="size-5" aria-hidden="true" />

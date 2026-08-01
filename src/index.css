@@ -152,3 +152,49 @@
     font-variant-numeric: tabular-nums;
   }
 }
+
+/*
+ * The cart button, right after something was added to it.
+ *
+ * The storefront has no client-side router: "Add to cart" is a real POST and a
+ * redirect, so the buyer lands back on the page they were reading with no sign
+ * anything happened except a number that changed while they were not looking.
+ * This is that sign — and it is CSS rather than JavaScript because hydration on
+ * this surface is deferred to idle-after-load, so a JS animation would fire
+ * seconds after the moment it is meant to mark, or not at all on a slow phone.
+ * The class is server-rendered, so the animation starts with the first paint.
+ *
+ * A shake rather than a bounce: a bounce reads as decoration, a shake reads as
+ * "look here". Small amplitude on purpose — the header is sticky and a large
+ * movement at the top of the viewport looks like the page is broken.
+ */
+@keyframes selld-cart-bump {
+  0% { transform: translateX(0) scale(1); }
+  15% { transform: translateX(-3px) scale(1.12); }
+  30% { transform: translateX(3px) scale(1.12); }
+  45% { transform: translateX(-2px) scale(1.08); }
+  60% { transform: translateX(2px) scale(1.08); }
+  75% { transform: translateX(-1px) scale(1.04); }
+  100% { transform: translateX(0) scale(1); }
+}
+
+.cart-bump {
+  animation: selld-cart-bump 620ms ease-in-out 1;
+}
+
+/*
+ * Motion is a preference, and for some people it is a medical one. The feedback
+ * still has to land, so the reduced-motion version keeps the emphasis and drops
+ * the movement rather than removing the cue altogether.
+ */
+@media (prefers-reduced-motion: reduce) {
+  @keyframes selld-cart-bump {
+    0% { opacity: 1; }
+    50% { opacity: 0.45; }
+    100% { opacity: 1; }
+  }
+
+  .cart-bump {
+    animation-duration: 400ms;
+  }
+}

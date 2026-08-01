@@ -20,6 +20,12 @@ export interface StorefrontContextValue {
   basePath: string
   /** Items in the cart, for the header badge. */
   cartCount: number
+  /**
+   * True on the one render that follows an add-to-cart, so the header can play
+   * its animation. Part of the payload rather than something the client works
+   * out, or the server and the hydrated client would disagree about a class name.
+   */
+  cartBump: boolean
 }
 
 /**

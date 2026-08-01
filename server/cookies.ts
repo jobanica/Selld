@@ -98,6 +98,32 @@ export function clearCartCookie(): string {
   return `${CART_COOKIE}=; Path=/; SameSite=Lax; HttpOnly; Max-Age=0`
 }
 
+/**
+ * A one-shot marker saying "something was just added", so the next page can say
+ * so back.
+ *
+ * The storefront has no client-side router: adding to the cart is a real POST and
+ * a redirect, so by the time the buyer sees anything the event that would have
+ * triggered an animation is two requests in the past. This cookie carries it
+ * across, the next render turns it into a class on the cart button, and that
+ * render clears it — which is why the animation plays once rather than on every
+ * page for the next minute.
+ *
+ * Short-lived on top of that, because a redirect that never lands (the buyer
+ * closes the tab) would otherwise leave the marker sitting there. Not `HttpOnly`
+ * for no reason and not `Secure` either: it holds the digit 1 and is read only by
+ * this server. It is short precisely so it cannot become state.
+ */
+export const CART_BUMP_COOKIE = 'selld_bump'
+
+export function cartBumpCookie(): string {
+  return `${CART_BUMP_COOKIE}=1; Path=/; SameSite=Lax; HttpOnly; Max-Age=20`
+}
+
+export function clearCartBumpCookie(): string {
+  return `${CART_BUMP_COOKIE}=; Path=/; SameSite=Lax; HttpOnly; Max-Age=0`
+}
+
 export interface RememberedCheckout {
   name?: string
   phone?: string
