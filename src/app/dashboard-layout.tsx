@@ -1,4 +1,5 @@
-import { Menu, Store, X } from 'lucide-react'
+import { Menu, X } from 'lucide-react'
+import { SelldMark } from '@/components/selld-logo'
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { NavLink, Outlet } from 'react-router-dom'
@@ -58,9 +59,7 @@ export function DashboardLayout() {
           to="/"
           className="flex shrink-0 items-center gap-2 font-semibold tracking-tight"
         >
-          <span className="grid size-7 place-items-center rounded-md bg-primary text-primary-foreground">
-            <Store className="size-4" aria-hidden="true" />
-          </span>
+          <SelldMark className="size-7 shrink-0" />
           {/* The wordmark yields to the store name on narrow screens. */}
           <span className="hidden sm:inline">{t('app.name')}</span>
         </NavLink>

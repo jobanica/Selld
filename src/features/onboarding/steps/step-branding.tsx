@@ -26,6 +26,7 @@ import { StepNav } from './step-nav'
  * contrast against white text, which is what the storefront renders on it.
  */
 const BRAND_COLORS = [
+  { value: '#3b3fe0', name: 'Selld blue' },
   { value: '#12604f', name: 'Jade' },
   { value: '#0f5b8a', name: 'Ocean' },
   { value: '#7c3aed', name: 'Violet' },

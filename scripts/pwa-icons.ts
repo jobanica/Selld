@@ -27,7 +27,7 @@ import { deflateSync } from 'node:zlib'
 
 const PUBLIC_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../public')
 
-const BRAND: Rgb = [0x12, 0x60, 0x4f]
+const BRAND: Rgb = [0x3b, 0x3f, 0xe0]
 const INK: Rgb = [0xff, 0xff, 0xff]
 
 type Rgb = readonly [number, number, number]
@@ -119,13 +119,20 @@ function iconPng(size: number, options: { maskable: boolean }): Buffer {
     // The handle: an annulus, upper half only.
     const r = Math.hypot(u - 0.5, v - 0.4)
     const handle = v < 0.4 && r > 0.145 && r < 0.2
-    // The little pocket at the foot, which is what makes it read as a bag
-    // rather than a box at 48 pixels.
-    const pocket = u > 0.41 && u < 0.59 && v > 0.63 && v < 0.81
-    const pocketStroke =
-      pocket && (u < 0.435 || u > 0.565 || v < 0.655)
+    /*
+     * The S, which is what the brand is built on and what a launcher icon has
+     * to be recognisable by at 48 pixels. Two bowls: the upper keeps its top
+     * and left, the lower keeps its bottom and right, and together they read as
+     * the letter. It replaces the bag pocket that used to sit here — the pocket
+     * said "bag", which the silhouette already says on its own.
+     */
+    const ring = (cx: number, cy: number, radius: number): number =>
+      Math.abs(Math.hypot(u - cx, v - cy) - radius)
+    const stroke = 0.028
+    const upper = ring(0.5, 0.535, 0.075) < stroke && (v < 0.535 || u < 0.5)
+    const lower = ring(0.5, 0.685, 0.075) < stroke && (v > 0.685 || u > 0.5)
 
-    return bodyStroke || handle || pocketStroke ? INK : BRAND
+    return bodyStroke || handle || upper || lower ? INK : BRAND
   }
 
   for (let y = 0; y < size; y += 1) {

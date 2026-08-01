@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
-import { Check, Store } from 'lucide-react'
+import { SelldMark } from '@/components/selld-logo'
+import { Check } from 'lucide-react'
 import { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -99,9 +100,7 @@ export function OnboardingWizard() {
     <div className="flex min-h-dvh flex-col bg-muted/30">
       <header className="flex h-14 shrink-0 items-center justify-between px-4">
         <span className="flex items-center gap-2 font-semibold tracking-tight">
-          <span className="grid size-7 place-items-center rounded-md bg-primary text-primary-foreground">
-            <Store className="size-4" aria-hidden="true" />
-          </span>
+          <SelldMark className="size-7 shrink-0" />
           {t('app.name')}
         </span>
         <LocaleSwitcher />

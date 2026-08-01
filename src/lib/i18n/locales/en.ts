@@ -5,6 +5,7 @@
 export const en = {
   app: {
     name: 'Selld',
+    brandTagline: 'Your Store. Your Brand. Your Growth.',
     tagline: 'The online store built for Filipino social sellers.',
   },
   nav: {

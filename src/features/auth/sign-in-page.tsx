@@ -1,4 +1,5 @@
-import { Eye, EyeOff, Store } from 'lucide-react'
+import { Eye, EyeOff } from 'lucide-react'
+import { SelldMark } from '@/components/selld-logo'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -144,10 +145,8 @@ export function SignInPage() {
     <div className="flex min-h-dvh flex-col bg-muted/30">
       <header className="flex h-14 items-center justify-between px-4">
         <span className="flex items-center gap-2 font-semibold tracking-tight">
-          <span className="grid size-7 place-items-center rounded-md bg-primary text-primary-foreground">
-            <Store className="size-4" aria-hidden="true" />
-          </span>
-          {t('app.name')}
+          <SelldMark className="size-7 shrink-0" />
+          Sell<span className="-ml-2 text-primary">d</span>
         </span>
         <LocaleSwitcher />
       </header>
@@ -245,7 +244,12 @@ export function SignInPage() {
             <>
               <CardHeader>
                 <CardTitle>{t('auth.signInTitle')}</CardTitle>
-                <CardDescription>{t('auth.signInSubtitle')}</CardDescription>
+                <CardDescription>
+                  <span className="block font-medium text-foreground/70">
+                    {t('app.brandTagline')}
+                  </span>
+                  <span className="mt-1 block">{t('auth.signInSubtitle')}</span>
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 <form onSubmit={handleRequest} className="flex flex-col gap-4">

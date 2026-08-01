@@ -53,7 +53,7 @@ describe('resolveTheme()', () => {
 
   it('falls back to brand_color, then to the Selld default', () => {
     expect(resolveTheme(store({ brandColor: '#b0245f' })).primary).toBe('#b0245f')
-    expect(resolveTheme(store()).primary).toBe('#12604f')
+    expect(resolveTheme(store()).primary).toBe('#3b3fe0')
   })
 
   it('ignores a malformed colour rather than emitting broken CSS', () => {
@@ -61,7 +61,7 @@ describe('resolveTheme()', () => {
     // future import path — could still carry junk. An invalid custom property
     // makes every use of it fall back to nothing, i.e. an unstyled store.
     const resolved = resolveTheme(store({ theme: { colors: { primary: 'red; }' } } }))
-    expect(resolved.primary).toBe('#12604f')
+    expect(resolved.primary).toBe('#3b3fe0')
   })
 
   it('never resolves a font to a webfont URL', () => {

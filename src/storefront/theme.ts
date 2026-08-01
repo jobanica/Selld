@@ -12,7 +12,7 @@ import type { Store } from './storefront-data'
 const HEX = /^#[0-9a-fA-F]{6}$/
 
 /** Selld's default, used when a store has set no colour of its own. */
-const DEFAULT_PRIMARY = '#12604f'
+const DEFAULT_PRIMARY = '#3b3fe0'
 
 export function isHexColor(value: unknown): value is string {
   return typeof value === 'string' && HEX.test(value)

@@ -28,6 +28,7 @@ import type { Translations } from './en'
 export const tl: Translations = {
   app: {
     name: 'Selld',
+    brandTagline: 'Your Store. Your Brand. Your Growth.',
     tagline: 'Ang online store na gawa para sa Pinoy social sellers.',
   },
   nav: {

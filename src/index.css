@@ -22,17 +22,17 @@
     system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial,
     'Noto Sans', sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
 
-  --color-brand-50: oklch(0.977 0.017 168);
-  --color-brand-100: oklch(0.947 0.04 168);
-  --color-brand-200: oklch(0.898 0.07 168);
-  --color-brand-300: oklch(0.83 0.104 168);
-  --color-brand-400: oklch(0.74 0.12 168);
-  --color-brand-500: oklch(0.66 0.122 168);
-  --color-brand-600: oklch(0.56 0.108 168);
-  --color-brand-700: oklch(0.46 0.09 168);
-  --color-brand-800: oklch(0.38 0.073 168);
-  --color-brand-900: oklch(0.32 0.06 168);
-  --color-brand-950: oklch(0.21 0.04 168);
+  --color-brand-50: oklch(0.972 0.016 271);
+  --color-brand-100: oklch(0.938 0.036 271);
+  --color-brand-200: oklch(0.886 0.070 271);
+  --color-brand-300: oklch(0.812 0.115 271);
+  --color-brand-400: oklch(0.706 0.176 271);
+  --color-brand-500: oklch(0.586 0.208 271);
+  --color-brand-600: oklch(0.508 0.249 271);
+  --color-brand-700: oklch(0.453 0.241 273);
+  --color-brand-800: oklch(0.385 0.205 272);
+  --color-brand-900: oklch(0.320 0.150 271);
+  --color-brand-950: oklch(0.231 0.068 269);
 }
 
 /*
@@ -49,8 +49,8 @@
   --card-foreground: var(--foreground);
   --popover: oklch(1 0 0);
   --popover-foreground: var(--foreground);
-  --primary: oklch(0.46 0.09 168);
-  --primary-foreground: oklch(0.985 0.005 168);
+  --primary: oklch(0.483 0.236 272);
+  --primary-foreground: oklch(0.985 0.005 272);
   --secondary: oklch(0.968 0.005 250);
   --secondary-foreground: oklch(0.27 0.015 250);
   --muted: oklch(0.968 0.005 250);
@@ -63,7 +63,7 @@
   --warning: oklch(0.75 0.15 75);
   --border: oklch(0.92 0.006 250);
   --input: oklch(0.92 0.006 250);
-  --ring: oklch(0.46 0.09 168);
+  --ring: oklch(0.483 0.236 272);
 }
 
 .dark {
@@ -73,8 +73,8 @@
   --card-foreground: var(--foreground);
   --popover: oklch(0.215 0.014 255);
   --popover-foreground: var(--foreground);
-  --primary: oklch(0.7 0.115 168);
-  --primary-foreground: oklch(0.19 0.03 168);
+  --primary: oklch(0.72 0.16 272);
+  --primary-foreground: oklch(0.17 0.05 272);
   --secondary: oklch(0.27 0.015 255);
   --secondary-foreground: var(--foreground);
   --muted: oklch(0.27 0.015 255);
@@ -87,7 +87,7 @@
   --warning: oklch(0.8 0.14 75);
   --border: oklch(1 0 0 / 12%);
   --input: oklch(1 0 0 / 16%);
-  --ring: oklch(0.7 0.115 168);
+  --ring: oklch(0.72 0.16 272);
 }
 
 /* Map the semantic variables into Tailwind's theme so utilities exist for them. */

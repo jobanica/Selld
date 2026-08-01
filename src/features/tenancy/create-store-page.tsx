@@ -1,4 +1,4 @@
-import { Store } from 'lucide-react'
+import { SelldMark } from '@/components/selld-logo'
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 
@@ -64,9 +64,7 @@ export function CreateStorePage() {
     <div className="flex min-h-dvh items-start justify-center bg-muted/30 px-4 py-8 sm:items-center">
       <Card className="w-full max-w-md">
         <CardHeader className="gap-3">
-          <span className="grid size-10 place-items-center rounded-lg bg-primary text-primary-foreground">
-            <Store className="size-5" aria-hidden="true" />
-          </span>
+          <SelldMark className="size-10 shrink-0" />
           <CardTitle>{t('tenant.noStoreTitle')}</CardTitle>
           <CardDescription>{t('tenant.noStoreBody')}</CardDescription>
         </CardHeader>
