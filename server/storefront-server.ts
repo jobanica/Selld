@@ -361,7 +361,12 @@ async function handle(
 ): Promise<void> {
   const host = (request.headers.host ?? '').toLowerCase()
   const hostname = host.split(':')[0] ?? ''
-  const url = new URL(request.url ?? '/', `http://${host || 'localhost'}`)
+  // Not a hardcoded `http://`. Behind a TLS-terminating host the request
+  // arrives as plain HTTP, so the origin — which becomes every canonical URL,
+  // OG tag and sitemap entry — would advertise the store over http. Nothing
+  // breaks; the links are just wrong in the one place a crawler reads them.
+  const scheme = isSecureRequest(request) ? 'https' : 'http'
+  const url = new URL(request.url ?? '/', `${scheme}://${host || 'localhost'}`)
 
   /**
    * The floor under everything below.
